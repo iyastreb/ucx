@@ -13,26 +13,7 @@
 #include <ucs/config/types.h>
 
 
-/**
- * @brief cuda ipc MD descriptor
- */
-typedef struct uct_cuda_ipc_md {
-    struct uct_md            super;   /**< Domain info */
-    CUuuid*                  uuid_map;
-    ucs_ternary_auto_value_t *peer_accessible_cache;
-    int                      uuid_map_size;
-    int                      uuid_map_capacity;
-} uct_cuda_ipc_md_t;
-
-/**
- * @brief cuda ipc component extension
- */
-typedef struct uct_cuda_ipc_component {
-    uct_component_t    super;
-    uct_cuda_ipc_md_t* md;
-} uct_cuda_ipc_component_t;
-
-extern uct_cuda_ipc_component_t uct_cuda_ipc_component;
+extern uct_component_t uct_cuda_ipc_component;
 
 /**
  * @brief cuda ipc domain configuration.

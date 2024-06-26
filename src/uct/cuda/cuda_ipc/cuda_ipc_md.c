@@ -14,6 +14,7 @@
 #include <limits.h>
 #include <ucs/debug/log.h>
 #include <ucs/sys/sys.h>
+#include <ucs/datastruct/khash.h>
 #include <ucs/debug/memtrack_int.h>
 #include <ucs/type/class.h>
 #include <ucs/profile/profile.h>
@@ -27,6 +28,94 @@ static ucs_config_field_t uct_cuda_ipc_md_config_table[] = {
 
     {NULL}
 };
+
+typedef struct {
+    /* GPU Device number */
+    int     dev_num;
+    /* Cache of accessible devices (ucs_ternary_auto_value_t) */
+    uint8_t accessible[0];
+} uct_cuda_ipc_dev_cache_t;
+
+static UCS_F_ALWAYS_INLINE int
+uct_cuda_ipc_uuid_equals(CUuuid a, CUuuid b)
+{
+    int64_t *a64 = (int64_t *)a.bytes;
+    int64_t *b64 = (int64_t *)b.bytes;
+    return (a64[0] == b64[0]) && (a64[1] == b64[1]);
+}
+
+static UCS_F_ALWAYS_INLINE khint32_t uct_cuda_ipc_uuid_hash_func(CUuuid key)
+{
+    return *((khint32_t *)key.bytes);
+}
+
+KHASH_INIT(cuda_ipc_uuid_hash, CUuuid, uct_cuda_ipc_dev_cache_t*, 1,
+           uct_cuda_ipc_uuid_hash_func, uct_cuda_ipc_uuid_equals);
+
+typedef struct {
+    khash_t(cuda_ipc_uuid_hash) hash;
+    ucs_recursive_spinlock_t    lock;
+} uct_cuda_ipc_uuid_cache_t;
+
+uct_cuda_ipc_uuid_cache_t uct_cuda_ipc_uuid_cache;
+
+static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_create_dev_cache(int dev_num)
+{
+    uct_cuda_ipc_dev_cache_t *cache;
+    ucs_status_t status;
+    int i, num_devices;
+
+    status = UCT_CUDADRV_FUNC_LOG_ERR(cuDeviceGetCount(&num_devices));
+    if (UCS_OK != status) {
+        ucs_error("cuDeviceGetCount() failed: %s", ucs_status_string(status));
+        return NULL;
+    }
+
+    cache = ucs_malloc(sizeof(*cache) + num_devices,
+                       "uct_cuda_ipc_dev_cache_t");
+    if (cache == NULL) {
+        ucs_error("failed to allocate memory for uct_cuda_ipc_dev_cache_t");
+        return NULL;
+    }
+
+    cache->dev_num = dev_num;
+    for (i = 0; i < num_devices; ++i) {
+        cache->accessible[i] = UCS_TRY;
+    }
+
+    return cache;
+}
+
+static uct_cuda_ipc_dev_cache_t * uct_cuda_ipc_get_dev_cache(const CUuuid *uuid)
+{
+    uct_cuda_ipc_dev_cache_t *cache   = NULL;
+    khash_t(cuda_ipc_uuid_hash) *hash = &uct_cuda_ipc_uuid_cache.hash;
+    khiter_t iter;
+    int ret;
+
+    iter = kh_put(cuda_ipc_uuid_hash, hash, *uuid, &ret);
+    switch (ret) {
+        case UCS_KH_PUT_BUCKET_EMPTY:
+        case UCS_KH_PUT_BUCKET_CLEAR:
+            cache = uct_cuda_ipc_create_dev_cache(kh_size(hash) - 1);
+            if (NULL != cache) {
+                kh_val(hash, iter) = cache;
+            } else {
+                kh_del(cuda_ipc_uuid_hash, hash, iter);
+            }
+            break;
+
+        case UCS_KH_PUT_KEY_PRESENT:
+            cache = kh_val(hash, iter);
+            break;
+
+        default:
+            ucs_error("kh_put(cuda_ipc_uuid_hash) failed with %d", ret);
+            break;
+    }
+
+    return cache;
+}
 
 static ucs_status_t
 uct_cuda_ipc_md_query(uct_md_h md, uct_md_attr_v2_t *md_attr)
@@ -115,101 +204,34 @@ found:
                                                     memh->dev_num));
 }
 
-static inline int uct_cuda_ipc_uuid_equals(const CUuuid* a, const CUuuid* b)
-{
-    int64_t *a0 = (int64_t *) a->bytes;
-    int64_t *b0 = (int64_t *) b->bytes;
-    return (a0[0] == b0[0]) && (a0[1] == b0[1]) ? 1 : 0;
-}
-
-static inline void uct_cuda_ipc_uuid_copy(CUuuid* dst, const CUuuid* src)
-{
-    int64_t *a = (int64_t *) src->bytes;
-    int64_t *b = (int64_t *) dst->bytes;
-    *b++ = *a++;
-    *b   = *a;
-}
-
-ucs_status_t uct_cuda_ipc_get_unique_index_for_uuid(int* idx,
-                                                    uct_cuda_ipc_md_t* md,
-                                                    uct_cuda_ipc_rkey_t *rkey)
-{
-    int i;
-    int num_devices;
-    int original_capacity, new_capacity;
-    int original_count, new_count;
-
-    for (i = 0; i < md->uuid_map_size; i++) {
-        if (uct_cuda_ipc_uuid_equals(&rkey->uuid, &md->uuid_map[i])) {
-            *idx = i;
-            return UCS_OK; /* found */
-        }
-    }
-
-    if (ucs_unlikely(md->uuid_map_size == md->uuid_map_capacity)) {
-        /* reallocate on demand */
-        UCT_CUDA_IPC_DEVICE_GET_COUNT(num_devices);
-        original_capacity     = md->uuid_map_capacity;
-        new_capacity          = md->uuid_map_capacity ?
-                                (md->uuid_map_capacity * 2) : 16;
-        original_count        = original_capacity * num_devices;
-        new_count             = new_capacity * num_devices;
-        md->uuid_map_capacity = new_capacity;
-        md->uuid_map          = ucs_realloc(md->uuid_map,
-                                            new_capacity * sizeof(CUuuid),
-                                            "uct_cuda_ipc_uuid_map");
-        if (md->uuid_map == NULL) {
-            return UCS_ERR_NO_MEMORY;
-        }
-
-        md->peer_accessible_cache = ucs_realloc(md->peer_accessible_cache,
-                                                new_count *
-                                                sizeof(ucs_ternary_auto_value_t),
-                                                "uct_cuda_ipc_peer_accessible_cache");
-        if (md->peer_accessible_cache == NULL) {
-            return UCS_ERR_NO_MEMORY;
-        }
-
-        for (i = original_count; i < new_count; i++) {
-            md->peer_accessible_cache[i] = UCS_TRY;
-        }
-    }
-
-    /* Add new mapping */
-    uct_cuda_ipc_uuid_copy(&md->uuid_map[md->uuid_map_size], &rkey->uuid);
-    *idx = md->uuid_map_size++;
-
-    return UCS_OK;
-}
-
-static ucs_status_t uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_component_t *mdc,
-                                                    uct_cuda_ipc_rkey_t *rkey)
+static ucs_status_t uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_rkey_t *rkey)
 {
     CUdevice this_device;
     ucs_status_t status;
-    int peer_idx;
-    int num_devices;
-    ucs_ternary_auto_value_t *accessible;
     void *d_mapped;
+    uct_cuda_ipc_dev_cache_t *cache;
+    uint8_t *accessible;
 
-    status = uct_cuda_ipc_get_unique_index_for_uuid(&peer_idx, mdc->md, rkey);
-    if (ucs_unlikely(status != UCS_OK)) {
+    status = UCT_CUDADRV_FUNC_LOG_DEBUG(cuCtxGetDevice(&this_device));
+    if (UCS_OK != status) {
+        return status;
+    }
+
+    ucs_recursive_spin_lock(&uct_cuda_ipc_uuid_cache.lock);
+
+    cache = uct_cuda_ipc_get_dev_cache(&rkey->uuid);
+    if (ucs_unlikely(NULL == cache)) {
+        status = UCS_ERR_NO_RESOURCE;
         goto err;
     }
 
     /* overwrite dev_num with a unique ID; this means that relative remote
      * device number of multiple peers do not map on the same stream and reduces
      * stream sequentialization */
-    rkey->dev_num = peer_idx;
+    rkey->dev_num = cache->dev_num;
 
-    UCT_CUDA_IPC_DEVICE_GET_COUNT(num_devices);
-    if (UCT_CUDADRV_FUNC_LOG_DEBUG(cuCtxGetDevice(&this_device)) != UCS_OK) {
-        status = UCS_ERR_UNREACHABLE;
-        goto err;
-    }
-
-    accessible = &mdc->md->peer_accessible_cache[peer_idx * num_devices + this_device];
-    if (*accessible == UCS_TRY) { /* unchecked, add to cache */
+    accessible = &cache->accessible[this_device];
+    if (ucs_unlikely(*accessible == UCS_TRY)) { /* unchecked, add to cache */
 
         /* Check if peer is reachable by trying to open memory handle. This is
          * necessary when the device is not visible through CUDA_VISIBLE_DEVICES
@@ -233,9 +255,10 @@ static ucs_status_t uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_component_t *md
                       ? UCS_YES : UCS_NO;
     }
 
-    return (*accessible == UCS_YES) ? UCS_OK : UCS_ERR_UNREACHABLE;
+    status = (*accessible == UCS_YES) ? UCS_OK : UCS_ERR_UNREACHABLE;
 
 err:
+    ucs_recursive_spin_unlock(&uct_cuda_ipc_uuid_cache.lock);
     return status;
 }
 
@@ -244,12 +267,11 @@ UCS_PROFILE_FUNC(ucs_status_t, uct_cuda_ipc_rkey_unpack,
                  uct_component_t *component, const void *rkey_buffer,
                  uct_rkey_t *rkey_p, void **handle_p)
 {
-    uct_cuda_ipc_component_t *com = ucs_derived_of(component, uct_cuda_ipc_component_t);
-    uct_cuda_ipc_rkey_t *packed   = (uct_cuda_ipc_rkey_t *) rkey_buffer;
+    uct_cuda_ipc_rkey_t *packed = (uct_cuda_ipc_rkey_t *) rkey_buffer;
     uct_cuda_ipc_rkey_t *key;
     ucs_status_t status;
 
-    status = uct_cuda_ipc_is_peer_accessible(com, packed);
+    status = uct_cuda_ipc_is_peer_accessible(packed);
     if (status != UCS_OK) {
         return status;
     }
@@ -284,9 +306,9 @@ uct_cuda_ipc_mem_reg(uct_md_h md, void *address, size_t length,
 
     UCT_CUDA_IPC_GET_DEVICE(cu_device);
 
-    memh = ucs_malloc(sizeof(*memh), "uct_cuda_ipc_rkey_t");
+    memh = ucs_malloc(sizeof(*memh), "uct_cuda_ipc_memh_t");
     if (NULL == memh) {
-        ucs_error("failed to allocate memory for uct_cuda_ipc_rkey_t");
+        ucs_error("failed to allocate memory for uct_cuda_ipc_memh_t");
         return UCS_ERR_NO_MEMORY;
     }
 
@@ -299,8 +321,7 @@ uct_cuda_ipc_mem_reg(uct_md_h md, void *address, size_t length,
 }
 
 static ucs_status_t
-uct_cuda_ipc_mem_dereg(uct_md_h md,
-                       const uct_md_mem_dereg_params_t *params)
+uct_cuda_ipc_mem_dereg(uct_md_h md, const uct_md_mem_dereg_params_t *params)
 {
     uct_cuda_ipc_memh_t *memh = params->memh;
     uct_cuda_ipc_lkey_t *key, *tmp;
@@ -311,17 +332,12 @@ uct_cuda_ipc_mem_dereg(uct_md_h md,
         ucs_free(key);
     }
 
-    ucs_free(params->memh);
+    ucs_free(memh);
     return UCS_OK;
 }
 
-
-static void uct_cuda_ipc_md_close(uct_md_h uct_md)
+static void uct_cuda_ipc_md_close(uct_md_h md)
 {
-    uct_cuda_ipc_md_t *md = ucs_derived_of(uct_md, uct_cuda_ipc_md_t);
-
-    ucs_free(md->uuid_map);
-    ucs_free(md->peer_accessible_cache);
     ucs_free(md);
 }
 
@@ -339,52 +355,50 @@ uct_cuda_ipc_md_open(uct_component_t *component, const char *md_name,
         .detect_memory_type = ucs_empty_function_return_unsupported
     };
 
-    uct_cuda_ipc_md_t* md;
-    uct_cuda_ipc_component_t* com;
-
-    md = ucs_calloc(1, sizeof(uct_cuda_ipc_md_t), "uct_cuda_ipc_md");
+    uct_md_t* md = ucs_calloc(1, sizeof(*md), "uct_cuda_ipc_md");
     if (md == NULL) {
         return UCS_ERR_NO_MEMORY;
     }
 
-    md->super.ops       = &md_ops;
-    md->super.component = &uct_cuda_ipc_component.super;
-
-    /* allocate uuid map and peer accessible cache */
-    md->uuid_map_size         = 0;
-    md->uuid_map_capacity     = 0;
-    md->uuid_map              = NULL;
-    md->peer_accessible_cache = NULL;
-
-    com     = ucs_derived_of(md->super.component, uct_cuda_ipc_component_t);
-    com->md = md;
-    *md_p   = &md->super;
+    md->ops       = &md_ops;
+    md->component = &uct_cuda_ipc_component;
+    *md_p         = md;
     return UCS_OK;
 }
 
-uct_cuda_ipc_component_t uct_cuda_ipc_component = {
-    .super = {
-        .query_md_resources = uct_cuda_base_query_md_resources,
-        .md_open            = uct_cuda_ipc_md_open,
-        .cm_open            = ucs_empty_function_return_unsupported,
-        .rkey_unpack        = uct_cuda_ipc_rkey_unpack,
-        .rkey_ptr           = ucs_empty_function_return_unsupported,
-        .rkey_release       = uct_cuda_ipc_rkey_release,
-        .rkey_compare       = uct_base_rkey_compare,
-        .name               = "cuda_ipc",
-        .md_config          = {
-            .name           = "Cuda-IPC memory domain",
-            .prefix         = "CUDA_IPC_",
-            .table          = uct_cuda_ipc_md_config_table,
-            .size           = sizeof(uct_cuda_ipc_md_config_t),
-        },
-        .cm_config          = UCS_CONFIG_EMPTY_GLOBAL_LIST_ENTRY,
-        .tl_list            = UCT_COMPONENT_TL_LIST_INITIALIZER(&uct_cuda_ipc_component.super),
-        .flags              = 0,
-        .md_vfs_init        =
-                (uct_component_md_vfs_init_func_t)ucs_empty_function
+uct_component_t uct_cuda_ipc_component = {
+    .query_md_resources = uct_cuda_base_query_md_resources,
+    .md_open            = uct_cuda_ipc_md_open,
+    .cm_open            = ucs_empty_function_return_unsupported,
+    .rkey_unpack        = uct_cuda_ipc_rkey_unpack,
+    .rkey_ptr           = ucs_empty_function_return_unsupported,
+    .rkey_release       = uct_cuda_ipc_rkey_release,
+    .rkey_compare       = uct_base_rkey_compare,
+    .name               = "cuda_ipc",
+    .md_config          = {
+        .name           = "Cuda-IPC memory domain",
+        .prefix         = "CUDA_IPC_",
+        .table          = uct_cuda_ipc_md_config_table,
+        .size           = sizeof(uct_cuda_ipc_md_config_t),
     },
-    .md                     = NULL,
+    .cm_config          = UCS_CONFIG_EMPTY_GLOBAL_LIST_ENTRY,
+    .tl_list            = UCT_COMPONENT_TL_LIST_INITIALIZER(&uct_cuda_ipc_component),
+    .flags              = 0,
+    .md_vfs_init        = (uct_component_md_vfs_init_func_t)ucs_empty_function
 };
-UCT_COMPONENT_REGISTER(&uct_cuda_ipc_component.super);
+UCT_COMPONENT_REGISTER(&uct_cuda_ipc_component);
 
+UCS_STATIC_INIT {
+    ucs_recursive_spinlock_init(&uct_cuda_ipc_uuid_cache.lock, 0);
+    kh_init_inplace(cuda_ipc_uuid_hash, &uct_cuda_ipc_uuid_cache.hash);
+}
+
+UCS_STATIC_CLEANUP {
+    uct_cuda_ipc_dev_cache_t *cache;
+
+    kh_foreach_value(&uct_cuda_ipc_uuid_cache.hash, cache, {
+        free(cache);
+    })
+    kh_destroy_inplace(cuda_ipc_uuid_hash, &uct_cuda_ipc_uuid_cache.hash);
+    ucs_recursive_spinlock_destroy(&uct_cuda_ipc_uuid_cache.lock);
+}
