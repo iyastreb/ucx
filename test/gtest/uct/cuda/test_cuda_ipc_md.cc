@@ -7,7 +7,6 @@
 #include <uct/test_md.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <thread>
 
 extern "C" {
 #include <uct/cuda/cuda_ipc/cuda_ipc_md.h>
