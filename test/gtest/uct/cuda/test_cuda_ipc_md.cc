@@ -12,11 +12,11 @@ extern "C" {
 #include <uct/cuda/cuda_ipc/cuda_ipc_md.h>
 }
 
-class test_cuda_ipc_md : public test_md
-{
+class test_cuda_ipc_md : public test_md {
 protected:
     static uct_cuda_ipc_rkey_t
-    unpack(uct_md_h md, int64_t uuid0 = 0, int64_t uuid1 = 0) {
+    unpack(uct_md_h md, int64_t uuid0 = 0, int64_t uuid1 = 0)
+    {
         CUdeviceptr ptr;
         EXPECT_EQ(CUDA_SUCCESS, cuMemAlloc(&ptr, 64));
         uct_mem_h memh;
@@ -28,8 +28,8 @@ protected:
         /* Mock UUID if non-zero value provided */
         if (uuid0 || uuid1) {
             int64_t *uuid64 = (int64_t *)rkey.uuid.bytes;
-            uuid64[0] = uuid0;
-            uuid64[1] = uuid1;
+            uuid64[0]       = uuid0;
+            uuid64[1]       = uuid1;
         }
 
         /* cuIpcOpenMemHandle used by cuda_ipc_cache does not allow to open
@@ -43,7 +43,8 @@ protected:
 
 class cuda_context {
 public:
-    cuda_context() {
+    cuda_context()
+    {
         if (cudaSetDevice(0) != cudaSuccess) {
             UCS_TEST_SKIP_R("can't set cuda device");
         }
@@ -61,7 +62,8 @@ public:
         }
     }
 
-    ~cuda_context() {
+    ~cuda_context()
+    {
         EXPECT_EQ(CUDA_SUCCESS, cuCtxDestroy(m_context));
     }
 

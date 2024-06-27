@@ -36,8 +36,7 @@ typedef struct {
     uint8_t accessible[0];
 } uct_cuda_ipc_dev_cache_t;
 
-static UCS_F_ALWAYS_INLINE int
-uct_cuda_ipc_uuid_equals(CUuuid a, CUuuid b)
+static UCS_F_ALWAYS_INLINE int uct_cuda_ipc_uuid_equals(CUuuid a, CUuuid b)
 {
     int64_t *a64 = (int64_t *)a.bytes;
     int64_t *b64 = (int64_t *)b.bytes;
@@ -58,7 +57,7 @@ typedef struct {
     ucs_recursive_spinlock_t    lock;
 } uct_cuda_ipc_uuid_cache_t;
 
-uct_cuda_ipc_uuid_cache_t uct_cuda_ipc_uuid_cache;
+static uct_cuda_ipc_uuid_cache_t uct_cuda_ipc_uuid_cache;
 
 static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_create_dev_cache(int dev_num)
 {
@@ -87,7 +86,7 @@ static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_create_dev_cache(int dev_num)
     return cache;
 }
 
-static uct_cuda_ipc_dev_cache_t * uct_cuda_ipc_get_dev_cache(const CUuuid *uuid)
+static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_get_dev_cache(const CUuuid *uuid)
 {
     uct_cuda_ipc_dev_cache_t *cache   = NULL;
     khash_t(cuda_ipc_uuid_hash) *hash = &uct_cuda_ipc_uuid_cache.hash;
@@ -96,23 +95,23 @@ static uct_cuda_ipc_dev_cache_t * uct_cuda_ipc_get_dev_cache(const CUuuid *uuid)
 
     iter = kh_put(cuda_ipc_uuid_hash, hash, *uuid, &ret);
     switch (ret) {
-        case UCS_KH_PUT_BUCKET_EMPTY:
-        case UCS_KH_PUT_BUCKET_CLEAR:
-            cache = uct_cuda_ipc_create_dev_cache(kh_size(hash) - 1);
-            if (NULL != cache) {
-                kh_val(hash, iter) = cache;
-            } else {
-                kh_del(cuda_ipc_uuid_hash, hash, iter);
-            }
-            break;
+    case UCS_KH_PUT_BUCKET_EMPTY:
+    case UCS_KH_PUT_BUCKET_CLEAR:
+        cache = uct_cuda_ipc_create_dev_cache(kh_size(hash) - 1);
+        if (NULL != cache) {
+            kh_val(hash, iter) = cache;
+        } else {
+            kh_del(cuda_ipc_uuid_hash, hash, iter);
+        }
+        break;
 
-        case UCS_KH_PUT_KEY_PRESENT:
-            cache = kh_val(hash, iter);
-            break;
+    case UCS_KH_PUT_KEY_PRESENT:
+        cache = kh_val(hash, iter);
+        break;
 
-        default:
-            ucs_error("kh_put(cuda_ipc_uuid_hash) failed with %d", ret);
-            break;
+    default:
+        ucs_error("kh_put(cuda_ipc_uuid_hash) failed with %d", ret);
+        break;
     }
 
     return cache;
@@ -268,7 +267,7 @@ UCS_PROFILE_FUNC(ucs_status_t, uct_cuda_ipc_rkey_unpack,
                  uct_component_t *component, const void *rkey_buffer,
                  uct_rkey_t *rkey_p, void **handle_p)
 {
-    uct_cuda_ipc_rkey_t *packed = (uct_cuda_ipc_rkey_t *) rkey_buffer;
+    uct_cuda_ipc_rkey_t *packed = (uct_cuda_ipc_rkey_t *)rkey_buffer;
     uct_cuda_ipc_rkey_t *key;
     ucs_status_t status;
 
@@ -356,7 +355,7 @@ uct_cuda_ipc_md_open(uct_component_t *component, const char *md_name,
         .detect_memory_type = ucs_empty_function_return_unsupported
     };
 
-    uct_md_t* md = ucs_calloc(1, sizeof(*md), "uct_cuda_ipc_md");
+    uct_md_t *md = ucs_calloc(1, sizeof(*md), "uct_cuda_ipc_md");
     if (md == NULL) {
         return UCS_ERR_NO_MEMORY;
     }
