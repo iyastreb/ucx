@@ -46,7 +46,7 @@ uct_cuda_ipc_uuid_equals(CUuuid a, CUuuid b)
 
 static UCS_F_ALWAYS_INLINE khint32_t uct_cuda_ipc_uuid_hash_func(CUuuid key)
 {
-    return *((khint32_t *)key.bytes);
+    return (khint32_t)(*((int32_t *)key.bytes));
 }
 
 KHASH_INIT(cuda_ipc_uuid_hash, CUuuid, uct_cuda_ipc_dev_cache_t*, 1,
