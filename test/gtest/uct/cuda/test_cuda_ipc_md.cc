@@ -36,6 +36,12 @@ protected:
          * handle that was created by the same process */
         EXPECT_EQ(UCS_ERR_UNREACHABLE,
                   md->component->rkey_unpack(md->component, &rkey, NULL, NULL));
+
+        uct_md_mem_dereg_params_t params;
+        params.field_mask = UCT_MD_MEM_DEREG_FIELD_MEMH;
+        params.memh       = memh;
+        EXPECT_UCS_OK(md->ops->mem_dereg(md, &params));
+
         EXPECT_EQ(CUDA_SUCCESS, cuMemFree(ptr));
         return rkey;
     }
