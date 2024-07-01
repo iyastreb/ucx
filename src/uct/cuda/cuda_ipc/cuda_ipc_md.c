@@ -14,7 +14,6 @@
 #include <limits.h>
 #include <ucs/debug/log.h>
 #include <ucs/sys/sys.h>
-#include <ucs/datastruct/khash.h>
 #include <ucs/debug/memtrack_int.h>
 #include <ucs/type/class.h>
 #include <ucs/profile/profile.h>
@@ -29,36 +28,6 @@ static ucs_config_field_t uct_cuda_ipc_md_config_table[] = {
     {NULL}
 };
 
-typedef struct {
-    /* GPU Device number */
-    int     dev_num;
-    /* Cache of accessible devices (ucs_ternary_auto_value_t) */
-    uint8_t accessible[0];
-} uct_cuda_ipc_dev_cache_t;
-
-static UCS_F_ALWAYS_INLINE int uct_cuda_ipc_uuid_equals(CUuuid a, CUuuid b)
-{
-    int64_t *a64 = (int64_t *)a.bytes;
-    int64_t *b64 = (int64_t *)b.bytes;
-    return (a64[0] == b64[0]) && (a64[1] == b64[1]);
-}
-
-static UCS_F_ALWAYS_INLINE khint32_t uct_cuda_ipc_uuid_hash_func(CUuuid key)
-{
-    int64_t *i64 = (int64_t *)key.bytes;
-    return (khint32_t)(i64[0]);
-}
-
-KHASH_INIT(cuda_ipc_uuid_hash, CUuuid, uct_cuda_ipc_dev_cache_t*, 1,
-           uct_cuda_ipc_uuid_hash_func, uct_cuda_ipc_uuid_equals);
-
-typedef struct {
-    khash_t(cuda_ipc_uuid_hash) hash;
-    ucs_recursive_spinlock_t    lock;
-} uct_cuda_ipc_uuid_cache_t;
-
-static uct_cuda_ipc_uuid_cache_t uct_cuda_ipc_uuid_cache;
-
 static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_create_dev_cache(int dev_num)
 {
     uct_cuda_ipc_dev_cache_t *cache;
@@ -71,7 +40,7 @@ static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_create_dev_cache(int dev_num)
         return NULL;
     }
 
-    cache = ucs_malloc(sizeof(*cache) + num_devices,
+    cache = ucs_malloc(sizeof(*cache) + (num_devices * sizeof(uint8_t)),
                        "uct_cuda_ipc_dev_cache_t");
     if (cache == NULL) {
         ucs_error("failed to allocate memory for uct_cuda_ipc_dev_cache_t");
@@ -86,32 +55,29 @@ static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_create_dev_cache(int dev_num)
     return cache;
 }
 
-static uct_cuda_ipc_dev_cache_t *uct_cuda_ipc_get_dev_cache(const CUuuid *uuid)
+static uct_cuda_ipc_dev_cache_t *
+uct_cuda_ipc_get_dev_cache(uct_cuda_ipc_component_t *component,
+                           const CUuuid *uuid)
 {
-    uct_cuda_ipc_dev_cache_t *cache   = NULL;
-    khash_t(cuda_ipc_uuid_hash) *hash = &uct_cuda_ipc_uuid_cache.hash;
+    khash_t(cuda_ipc_uuid_hash) *hash = &component->uuid_hash;
+    uct_cuda_ipc_dev_cache_t *cache;
     khiter_t iter;
     int ret;
 
     iter = kh_put(cuda_ipc_uuid_hash, hash, *uuid, &ret);
-    switch (ret) {
-    case UCS_KH_PUT_BUCKET_EMPTY:
-    case UCS_KH_PUT_BUCKET_CLEAR:
+    if (ret == UCS_KH_PUT_KEY_PRESENT) {
+        cache = kh_val(hash, iter);
+    } else if ((ret == UCS_KH_PUT_BUCKET_EMPTY) ||
+               (ret == UCS_KH_PUT_BUCKET_CLEAR)) {
         cache = uct_cuda_ipc_create_dev_cache(kh_size(hash) - 1);
         if (NULL != cache) {
             kh_val(hash, iter) = cache;
         } else {
             kh_del(cuda_ipc_uuid_hash, hash, iter);
         }
-        break;
-
-    case UCS_KH_PUT_KEY_PRESENT:
-        cache = kh_val(hash, iter);
-        break;
-
-    default:
+    } else {
         ucs_error("kh_put(cuda_ipc_uuid_hash) failed with %d", ret);
-        break;
+        cache = NULL;
     }
 
     return cache;
@@ -204,7 +170,9 @@ found:
                                                     memh->dev_num));
 }
 
-static ucs_status_t uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_rkey_t *rkey)
+static ucs_status_t
+uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_component_t *component,
+                                uct_cuda_ipc_rkey_t *rkey)
 {
     CUdevice this_device;
     ucs_status_t status;
@@ -217,9 +185,9 @@ static ucs_status_t uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_rkey_t *rkey)
         return status;
     }
 
-    ucs_recursive_spin_lock(&uct_cuda_ipc_uuid_cache.lock);
+    ucs_spin_lock(&component->lock);
 
-    cache = uct_cuda_ipc_get_dev_cache(&rkey->uuid);
+    cache = uct_cuda_ipc_get_dev_cache(component, &rkey->uuid);
     if (ucs_unlikely(NULL == cache)) {
         status = UCS_ERR_NO_RESOURCE;
         goto err;
@@ -258,7 +226,7 @@ static ucs_status_t uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_rkey_t *rkey)
     status = (*accessible == UCS_YES) ? UCS_OK : UCS_ERR_UNREACHABLE;
 
 err:
-    ucs_recursive_spin_unlock(&uct_cuda_ipc_uuid_cache.lock);
+    ucs_spin_unlock(&component->lock);
     return status;
 }
 
@@ -267,11 +235,13 @@ UCS_PROFILE_FUNC(ucs_status_t, uct_cuda_ipc_rkey_unpack,
                  uct_component_t *component, const void *rkey_buffer,
                  uct_rkey_t *rkey_p, void **handle_p)
 {
-    uct_cuda_ipc_rkey_t *packed = (uct_cuda_ipc_rkey_t *)rkey_buffer;
+    uct_cuda_ipc_component_t *com = ucs_derived_of(component,
+                                                   uct_cuda_ipc_component_t);
+    uct_cuda_ipc_rkey_t *packed   = (uct_cuda_ipc_rkey_t *)rkey_buffer;
     uct_cuda_ipc_rkey_t *key;
     ucs_status_t status;
 
-    status = uct_cuda_ipc_is_peer_accessible(packed);
+    status = uct_cuda_ipc_is_peer_accessible(com, packed);
     if (status != UCS_OK) {
         return status;
     }
@@ -354,51 +324,57 @@ uct_cuda_ipc_md_open(uct_component_t *component, const char *md_name,
         .mem_attach         = ucs_empty_function_return_unsupported,
         .detect_memory_type = ucs_empty_function_return_unsupported
     };
+    uct_md_t *md;
 
-    uct_md_t *md = ucs_calloc(1, sizeof(*md), "uct_cuda_ipc_md");
+    md = ucs_calloc(1, sizeof(*md), "uct_cuda_ipc_md");
     if (md == NULL) {
         return UCS_ERR_NO_MEMORY;
     }
 
     md->ops       = &md_ops;
-    md->component = &uct_cuda_ipc_component;
+    md->component = &uct_cuda_ipc_component.super;
     *md_p         = md;
     return UCS_OK;
 }
 
-uct_component_t uct_cuda_ipc_component = {
-    .query_md_resources = uct_cuda_base_query_md_resources,
-    .md_open            = uct_cuda_ipc_md_open,
-    .cm_open            = ucs_empty_function_return_unsupported,
-    .rkey_unpack        = uct_cuda_ipc_rkey_unpack,
-    .rkey_ptr           = ucs_empty_function_return_unsupported,
-    .rkey_release       = uct_cuda_ipc_rkey_release,
-    .rkey_compare       = uct_base_rkey_compare,
-    .name               = "cuda_ipc",
-    .md_config          = {
-        .name           = "Cuda-IPC memory domain",
-        .prefix         = "CUDA_IPC_",
-        .table          = uct_cuda_ipc_md_config_table,
-        .size           = sizeof(uct_cuda_ipc_md_config_t),
+uct_cuda_ipc_component_t uct_cuda_ipc_component = {
+    .super = {
+        .query_md_resources = uct_cuda_base_query_md_resources,
+        .md_open            = uct_cuda_ipc_md_open,
+        .cm_open            = ucs_empty_function_return_unsupported,
+        .rkey_unpack        = uct_cuda_ipc_rkey_unpack,
+        .rkey_ptr           = ucs_empty_function_return_unsupported,
+        .rkey_release       = uct_cuda_ipc_rkey_release,
+        .rkey_compare       = uct_base_rkey_compare,
+        .name               = "cuda_ipc",
+        .md_config          = {
+            .name           = "Cuda-IPC memory domain",
+            .prefix         = "CUDA_IPC_",
+            .table          = uct_cuda_ipc_md_config_table,
+            .size           = sizeof(uct_cuda_ipc_md_config_t),
+        },
+        .cm_config          = UCS_CONFIG_EMPTY_GLOBAL_LIST_ENTRY,
+        .tl_list            = UCT_COMPONENT_TL_LIST_INITIALIZER(&uct_cuda_ipc_component.super),
+        .flags              = 0,
+        .md_vfs_init        =
+                (uct_component_md_vfs_init_func_t)ucs_empty_function
     },
-    .cm_config          = UCS_CONFIG_EMPTY_GLOBAL_LIST_ENTRY,
-    .tl_list            = UCT_COMPONENT_TL_LIST_INITIALIZER(&uct_cuda_ipc_component),
-    .flags              = 0,
-    .md_vfs_init        = (uct_component_md_vfs_init_func_t)ucs_empty_function
+    .uuid_hash              = KHASH_STATIC_INITIALIZER,
+    .lock                   = {0}
 };
-UCT_COMPONENT_REGISTER(&uct_cuda_ipc_component);
+UCT_COMPONENT_REGISTER(&uct_cuda_ipc_component.super);
 
 UCS_STATIC_INIT {
-    ucs_recursive_spinlock_init(&uct_cuda_ipc_uuid_cache.lock, 0);
-    kh_init_inplace(cuda_ipc_uuid_hash, &uct_cuda_ipc_uuid_cache.hash);
+    ucs_spinlock_init(&uct_cuda_ipc_component.lock, 0);
+    kh_init_inplace(cuda_ipc_uuid_hash, &uct_cuda_ipc_component.uuid_hash);
 }
 
 UCS_STATIC_CLEANUP {
     uct_cuda_ipc_dev_cache_t *cache;
 
-    kh_foreach_value(&uct_cuda_ipc_uuid_cache.hash, cache, {
+    kh_foreach_value(&uct_cuda_ipc_component.uuid_hash, cache, {
         free(cache);
     })
-    kh_destroy_inplace(cuda_ipc_uuid_hash, &uct_cuda_ipc_uuid_cache.hash);
-    ucs_recursive_spinlock_destroy(&uct_cuda_ipc_uuid_cache.lock);
+    kh_destroy_inplace(cuda_ipc_uuid_hash, &uct_cuda_ipc_component.uuid_hash);
+    ucs_spinlock_destroy(&uct_cuda_ipc_component.lock);
 }

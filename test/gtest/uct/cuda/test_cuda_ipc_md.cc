@@ -15,7 +15,7 @@ extern "C" {
 class test_cuda_ipc_md : public test_md {
 protected:
     static uct_cuda_ipc_rkey_t
-    unpack(uct_md_h md, int64_t uuid0 = 0, int64_t uuid1 = 0)
+    unpack(uct_md_h md, int64_t uuid)
     {
         CUdeviceptr ptr;
         EXPECT_EQ(CUDA_SUCCESS, cuMemAlloc(&ptr, 64));
@@ -25,12 +25,9 @@ protected:
         EXPECT_UCS_OK(md->ops->mkey_pack(md, memh, (void *)ptr, 64, NULL,
                                          &rkey));
 
-        /* Mock UUID if non-zero value provided */
-        if (uuid0 || uuid1) {
-            int64_t *uuid64 = (int64_t *)rkey.uuid.bytes;
-            uuid64[0]       = uuid0;
-            uuid64[1]       = uuid1;
-        }
+        int64_t *uuid64 = (int64_t *)rkey.uuid.bytes;
+        uuid64[0]       = uuid;
+        uuid64[1]       = uuid;
 
         /* cuIpcOpenMemHandle used by cuda_ipc_cache does not allow to open
          * handle that was created by the same process */
@@ -96,10 +93,10 @@ UCS_MT_TEST_P(test_cuda_ipc_md, multiple_mds, 8)
 
     for (int64_t i = 0; i < 64; ++i) {
         /* We get unique dev_num on new UUID */
-        uct_cuda_ipc_rkey_t rkey = unpack(md, i + 1, i + 1);
+        uct_cuda_ipc_rkey_t rkey = unpack(md, i + 1);
         EXPECT_EQ(i, rkey.dev_num);
         /* Subsequent call with the same UUID returns value from cache */
-        rkey = unpack(md, i + 1, i + 1);
+        rkey = unpack(md, i + 1);
         EXPECT_EQ(i, rkey.dev_num);
     }
 }
