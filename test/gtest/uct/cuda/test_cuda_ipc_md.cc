@@ -14,8 +14,7 @@ extern "C" {
 
 class test_cuda_ipc_md : public test_md {
 protected:
-    static uct_cuda_ipc_rkey_t
-    unpack(uct_md_h md, int64_t uuid)
+    static uct_cuda_ipc_rkey_t unpack(uct_md_h md, int64_t uuid)
     {
         CUdeviceptr ptr;
         EXPECT_EQ(CUDA_SUCCESS, cuMemAlloc(&ptr, 64));

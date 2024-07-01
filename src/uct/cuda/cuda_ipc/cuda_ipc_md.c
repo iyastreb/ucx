@@ -197,8 +197,7 @@ uct_cuda_ipc_is_peer_accessible(uct_cuda_ipc_component_t *component,
      * device number of multiple peers do not map on the same stream and reduces
      * stream sequentialization */
     rkey->dev_num = cache->dev_num;
-
-    accessible = &cache->accessible[this_device];
+    accessible    = &cache->accessible[this_device];
     if (ucs_unlikely(*accessible == UCS_TRY)) { /* unchecked, add to cache */
 
         /* Check if peer is reachable by trying to open memory handle. This is
