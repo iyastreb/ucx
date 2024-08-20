@@ -41,7 +41,7 @@ ucp_proto_rndv_ppln_probe(const ucp_proto_init_params_t *init_params)
     const ucp_proto_select_param_t *select_param = init_params->select_param;
     ucp_proto_common_init_params_t err_params    = {
         .super = *init_params,
-        .flags = 0
+        .flags = UCP_PROTO_COMMON_INIT_FLAG_ERR_HANDLING
     };
     const ucp_proto_select_elem_t *select_elem;
     const ucp_proto_perf_range_t *frag_range;
@@ -295,6 +295,14 @@ ucp_proto_rndv_send_ppln_atp_progress(uct_pending_req_t *uct_req)
                                        ucp_proto_request_zcopy_complete_success);
 }
 
+static void ucp_proto_rndv_ppln_abort(ucp_request_t *req, ucs_status_t status)
+{
+    /* FIXME: Proper abort functionality is not implemented yet.
+     * This stub function is used to advertize error-handling capability for
+     * pipeline protocols, but proper implementation is to be done */
+    ucp_invoke_uct_completion(&req->send.state.uct_comp, status);
+}
+
 ucp_proto_t ucp_rndv_send_ppln_proto = {
     .name     = "rndv/send/ppln",
     .desc     = NULL,
@@ -305,7 +313,7 @@ ucp_proto_t ucp_rndv_send_ppln_proto = {
         [UCP_PROTO_RNDV_PPLN_STAGE_SEND] = ucp_proto_rndv_ppln_progress,
         [UCP_PROTO_RNDV_PPLN_STAGE_ACK]  = ucp_proto_rndv_send_ppln_atp_progress,
     },
-    .abort    = ucp_proto_abort_fatal_not_implemented,
+    .abort    = ucp_proto_rndv_ppln_abort,
     .reset    = (ucp_request_reset_func_t)ucp_proto_reset_fatal_not_implemented
 };
 
@@ -358,6 +366,6 @@ ucp_proto_t ucp_rndv_recv_ppln_proto = {
         [UCP_PROTO_RNDV_PPLN_STAGE_SEND] = ucp_proto_rndv_ppln_progress,
         [UCP_PROTO_RNDV_PPLN_STAGE_ACK]  = ucp_proto_rndv_recv_ppln_ats_progress,
     },
-    .abort    = ucp_proto_abort_fatal_not_implemented,
+    .abort    = ucp_proto_rndv_ppln_abort,
     .reset    = ucp_proto_rndv_ppln_reset
 };

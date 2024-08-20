@@ -577,7 +577,8 @@ ucp_proto_rndv_put_mtype_probe(const ucp_proto_init_params_t *init_params)
 
     ucp_proto_rndv_put_common_probe(init_params,
                                     UCS_BIT(UCP_RNDV_MODE_PUT_PIPELINE),
-                                    frag_size, UCT_EP_OP_GET_ZCOPY, 0,
+                                    frag_size, UCT_EP_OP_GET_ZCOPY,
+                                    UCP_PROTO_COMMON_INIT_FLAG_ERR_HANDLING,
                                     mdesc_md_map, comp_cb, 1,
                                     UCP_WORKER_STAT_RNDV_PUT_MTYPE_ZCOPY);
 }
@@ -590,6 +591,15 @@ ucp_proto_rndv_put_mtype_query(const ucp_proto_query_params_t *params,
 
     put_desc = ucp_proto_rndv_put_common_query(params, attr);
     ucp_proto_rndv_mtype_query_desc(params, attr, put_desc);
+}
+
+static void
+ucp_proto_rndv_put_mtype_abort(ucp_request_t *req, ucs_status_t status)
+{
+    /* FIXME: Proper abort functionality is not implemented yet.
+     * This stub function is used to advertize error-handling capability for
+     * rndv_put_mtype protocol, but proper implementation is to be done */
+    ucp_invoke_uct_completion(&req->send.state.uct_comp, status);
 }
 
 ucp_proto_t ucp_rndv_put_mtype_proto = {
@@ -605,6 +615,6 @@ ucp_proto_t ucp_rndv_put_mtype_proto = {
         [UCP_PROTO_RNDV_PUT_STAGE_ATP]        = ucp_proto_rndv_put_common_atp_progress,
         [UCP_PROTO_RNDV_PUT_STAGE_FENCED_ATP] = ucp_proto_rndv_put_common_fenced_atp_progress,
     },
-    .abort    = ucp_proto_abort_fatal_not_implemented,
+    .abort    = ucp_proto_rndv_put_mtype_abort,
     .reset    = (ucp_request_reset_func_t)ucp_proto_reset_fatal_not_implemented
 };

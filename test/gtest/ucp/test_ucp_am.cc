@@ -1981,7 +1981,9 @@ UCP_INSTANTIATE_TEST_CASE_GPU_AWARE(test_ucp_am_nbx_rndv_memtype_disable_zcopy);
 #ifdef ENABLE_STATS
 class test_ucp_am_nbx_rndv_ppln : public test_ucp_am_nbx_rndv {
 public:
-    test_ucp_am_nbx_rndv_ppln() : m_mem_type(UCS_MEMORY_TYPE_HOST) {}
+    test_ucp_am_nbx_rndv_ppln() : m_mem_type(UCS_MEMORY_TYPE_HOST) {
+        modify_config("PROTO_ENABLE", "y");
+    }
 
     void init() override
     {
@@ -2007,10 +2009,22 @@ public:
             return;
         }
 
-        add_variant_with_value(variants, UCP_FEATURE_AM, 0, "");
+        add_variant_with_value(variants, UCP_FEATURE_AM,
+                               UCP_ERR_HANDLING_MODE_NONE, "");
+        add_variant_with_value(variants, UCP_FEATURE_AM,
+                               UCP_ERR_HANDLING_MODE_PEER, "error-handling");
     }
 
 protected:
+    virtual ucp_ep_params_t get_ep_params()
+    {
+        ucp_ep_params_t ep_params = test_ucp_am_nbx_rndv::get_ep_params();
+        ep_params.field_mask     |= UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE;
+        ep_params.err_mode        = static_cast<ucp_err_handling_mode_t>(
+                                                        get_variant_value());
+        return ep_params;
+    }
+
     void test_ppln_send(ucs_memory_type_t mem_type, size_t num_frags,
                         uint64_t stats_cntr_value)
     {
