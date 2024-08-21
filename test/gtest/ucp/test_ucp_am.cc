@@ -2016,7 +2016,7 @@ public:
     }
 
 protected:
-    virtual ucp_ep_params_t get_ep_params()
+    virtual ucp_ep_params_t get_ep_params() override
     {
         ucp_ep_params_t ep_params = test_ucp_am_nbx_rndv::get_ep_params();
         ep_params.field_mask     |= UCP_EP_PARAM_FIELD_ERR_HANDLING_MODE;
