@@ -654,7 +654,7 @@ out:
         return UCS_ERR_UNREACHABLE;
     }
 
-    ucs_trace("ep %p: selected for %s: " UCT_TL_RESOURCE_DESC_FMT " md[%d]"
+    ucs_diag("ep %p: selected for %s: " UCT_TL_RESOURCE_DESC_FMT " md[%d]"
               " -> '%s' address[%d],md[%d] score %.2f",
               ep, criteria->title,
               UCT_TL_RESOURCE_DESC_ARG(
@@ -1377,13 +1377,14 @@ ucp_wireup_rma_bw_score_func(const ucp_worker_iface_t *wiface,
     ucp_wireup_dev_usage_count *dev_count = arg;
     ucp_context_t *context                = wiface->worker->context;
     ucs_linear_func_t mem_reg_cost;
+    double score;
 
     mem_reg_cost = ucp_wireup_mem_reg_cost(context, unpacked_addr, md_attr);
 
     /* highest bandwidth with lowest overhead - test a message size of 256KB,
      * a size which is likely to be used for high-bw memory access protocol, for
      * how long it would take to transfer it with a certain transport. */
-    return 1 / ((UCP_WIREUP_RMA_BW_TEST_MSG_SIZE /
+    score = 1 / ((UCP_WIREUP_RMA_BW_TEST_MSG_SIZE /
                  ucp_wireup_iface_avail_bandwidth(wiface, unpacked_addr,
                                                   remote_addr, dev_count)) +
                 ucp_wireup_tl_iface_latency(wiface, unpacked_addr,
@@ -1392,6 +1393,17 @@ ucp_wireup_rma_bw_score_func(const ucp_worker_iface_t *wiface,
                 wiface->attr.overhead +
                 ucs_linear_func_apply(mem_reg_cost,
                                       UCP_WIREUP_RMA_BW_TEST_MSG_SIZE));
+
+    ucs_diag("ucp_wireup_rma_bw_score_func: " UCT_TL_RESOURCE_DESC_FMT
+             "score=%.2f bw=%.2f lat=%.2f overhead=%.2f reg_cost=%.2f",
+             UCT_TL_RESOURCE_DESC_ARG(&context->tl_rscs[wiface->rsc_index].tl_rsc),
+             score,
+             ucp_wireup_iface_avail_bandwidth(wiface, unpacked_addr, remote_addr, dev_count) / UCS_MBYTE,
+             ucp_wireup_tl_iface_latency(wiface, unpacked_addr, &remote_addr->iface_attr, is_prioritized_ep),
+             wiface->attr.overhead,
+             ucs_linear_func_apply(mem_reg_cost, UCP_WIREUP_RMA_BW_TEST_MSG_SIZE));
+
+    return score;
 }
 
 static inline int

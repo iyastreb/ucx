@@ -1234,7 +1234,7 @@ static void ucp_worker_iface_set_sys_device_distance(ucp_worker_iface_t *wiface)
 
         ucs_topo_get_distance(device, cmp_device, distance);
 
-        ucs_trace("distance between %s/%s and %s/%s is %s",
+        ucs_diag("distance between %s/%s and %s/%s is %s",
                   context->tl_rscs[wiface->rsc_index].tl_rsc.tl_name,
                   ucs_topo_sys_device_get_name(device), cmp_rsc->tl_rsc.tl_name,
                   ucs_topo_sys_device_get_name(cmp_device),
@@ -2258,6 +2258,21 @@ static void ucp_worker_keepalive_reset(ucp_worker_h worker)
     worker->keepalive.round_count = 0;
 }
 
+static void ucp_worker_trace_configs(ucp_worker_h worker)
+{
+    ucp_ep_config_t *ep_config;
+    ucp_rkey_config_t *rkey_config;
+
+    ucs_array_for_each(ep_config, &worker->ep_config) {
+        ucp_proto_select_trace(worker, &ep_config->proto_select);
+    }
+
+    ucs_carray_for_each(rkey_config, worker->rkey_config,
+                        worker->rkey_config_count) {
+        ucp_proto_select_trace(worker, &rkey_config->proto_select);
+    }
+}
+
 static void ucp_worker_destroy_configs(ucp_worker_h worker)
 {
     ucp_ep_config_t *ep_config;
@@ -2910,6 +2925,9 @@ static void ucp_worker_destroy_eps(ucp_worker_h worker,
 void ucp_worker_destroy(ucp_worker_h worker)
 {
     ucs_debug("destroy worker %p", worker);
+    if (worker->context->config.trace_used_proto_selections) {
+        ucp_worker_trace_configs(worker);
+    }
 
     UCS_ASYNC_BLOCK(&worker->async);
     uct_worker_progress_unregister_safe(worker->uct, &worker->keepalive.cb_id);
