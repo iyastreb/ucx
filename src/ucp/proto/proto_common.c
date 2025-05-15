@@ -259,12 +259,19 @@ static void ucp_proto_common_update_lane_perf_by_distance(
         return;
     }
 
-    perf->bandwidth    = ucs_min(perf->bandwidth, distance->bandwidth);
-    perf->sys_latency += distance->latency;
-
     va_start(ap, perf_fmt);
     ucs_vsnprintf_safe(perf_node_desc, sizeof(perf_node_desc), perf_fmt, ap);
     va_end(ap);
+
+    if (perf->bandwidth > distance->bandwidth) {
+        ucs_diag("reduce %s due to %s perf->bandwidth: %.2f distance->bandwidth: %.2f",
+                 perf_node_desc, perf_name, perf->bandwidth / UCS_MBYTE,
+                 distance->bandwidth / UCS_MBYTE);
+    }
+
+
+    perf->bandwidth    = ucs_min(perf->bandwidth, distance->bandwidth);
+    perf->sys_latency += distance->latency;
 
     sys_perf_node = ucp_proto_perf_node_new_data(perf_name, "%s",
                                                  perf_node_desc);

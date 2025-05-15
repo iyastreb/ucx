@@ -610,7 +610,7 @@ void ucp_proto_select_add_proto(const ucp_proto_init_params_t *init_params,
                     proto_name);
     }
 
-    ucs_trace("added protocol %s cfg_thresh %s cfg_priority %d priv_size %zu",
+    ucs_diag("added protocol %s cfg_thresh %s cfg_priority %d priv_size %zu",
               proto_name,
               ucs_memunits_to_str(cfg_thresh, cfg_thresh_str,
                                   sizeof(cfg_thresh_str)),

@@ -98,10 +98,6 @@ void ucp_proto_select_init_trace_perf(const ucp_proto_init_params_t *init_params
     size_t seg_start, seg_end, range_start, range_end;
     char range_str[64];
 
-    if (!ucs_log_is_enabled(UCS_LOG_LEVEL_TRACE)) {
-        return;
-    }
-
     range_end = -1;
     do {
         range_start             = range_end + 1;
@@ -114,7 +110,7 @@ void ucp_proto_select_init_trace_perf(const ucp_proto_init_params_t *init_params
                                              range_start, range_end) {
             ucs_string_buffer_reset(&seg_strb);
             ucp_proto_perf_segment_str(seg, &seg_strb);
-            ucs_trace("%s: %s %s %s", ucs_string_buffer_cstr(&seg_strb),
+            ucs_diag("%s: %s %s %s", ucs_string_buffer_cstr(&seg_strb),
                       ucs_memunits_range_str(seg_start, seg_end, range_str,
                                              sizeof(range_str)),
                       query_attr.desc, query_attr.config);

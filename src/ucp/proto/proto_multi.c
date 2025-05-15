@@ -107,7 +107,7 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
             continue;
         }
 
-        ucs_trace("lane[%d]" UCP_PROTO_TIME_FMT(send_pre_overhead)
+        ucs_diag("lane[%d]" UCP_PROTO_TIME_FMT(send_pre_overhead)
                   UCP_PROTO_TIME_FMT(send_post_overhead)
                   UCP_PROTO_TIME_FMT(recv_overhead)
                   " bw " UCP_PROTO_PERF_FUNC_BW_FMT

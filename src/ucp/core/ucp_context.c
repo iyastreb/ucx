@@ -1144,6 +1144,8 @@ static void ucp_add_tl_resource_if_enabled(
                                   ucs_crc16_string(resource->tl_name);
         context->tl_rscs[context->num_tls].flags        = rsc_flags;
 
+        ucs_diag("resource added: %s sys_device: %d", resource->tl_name, resource->sys_device);
+
         dev_index = 0;
         for (i = 0; i < context->num_tls; ++i) {
             if (ucp_tl_resource_is_same_device(&context->tl_rscs[i].tl_rsc, resource)) {
