@@ -225,9 +225,10 @@ ucp_proto_put_offload_zcopy_send_func(ucp_request_t *req,
     uct_rkey_t tl_rkey = ucp_rkey_get_tl_rkey(req->send.rma.rkey,
                                               lpriv->super.rkey_index);
     uct_iov_t iov;
+    size_t max_payload = ucp_proto_multi_max_payload(req, lpriv, 0);
 
     ucp_datatype_iter_next_iov(&req->send.state.dt_iter,
-                               ucp_proto_multi_max_payload(req, lpriv, 0),
+                               max_payload,
                                lpriv->super.md_index, UCP_DT_MASK_CONTIG_IOV,
                                next_iter, &iov, 1);
     return uct_ep_put_zcopy(ucp_ep_get_lane(req->send.ep, lpriv->super.lane),
