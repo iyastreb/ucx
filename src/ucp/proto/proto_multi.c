@@ -162,6 +162,8 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
     uint32_t weight_sum;
     ucs_status_t status;
     int fixed_first_lane;
+    const char *weight_env = getenv("WEIGHT");
+    int weight = (weight_env != NULL) ? atoi(weight_env) : 0;
 
     ucs_assert(params->max_lanes <= UCP_PROTO_MAX_LANES);
 
@@ -319,8 +321,15 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
         perf.max_frag  += max_frag;
 
         /* Calculate lane weight as a fixed-point fraction */
+        if (weight && selection.num_lanes == 2) {
+            lpriv->weight = ucs_proto_multi_calc_weight(weight, 100);
+            weight = 100 - weight;
+        } else {
+        
         lpriv->weight = ucs_proto_multi_calc_weight(lane_perf->bandwidth,
                                                     perf.bandwidth);
+        
+        }
         ucs_assert(lpriv->weight > 0);
         ucs_assert(lpriv->weight <= UCP_PROTO_MULTI_WEIGHT_MAX);
 
