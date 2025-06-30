@@ -22,6 +22,10 @@
 #define UCT_CUDA_IPC_PUT 0
 #define UCT_CUDA_IPC_GET 1
 
+#include "/workspace/perf.h"
+
+PERF_DECL(put_zcopy)
+PERF_DECL(async_copy)
 
 static UCS_CLASS_INIT_FUNC(uct_cuda_ipc_ep_t, const uct_ep_params_t *params)
 {
@@ -154,6 +158,7 @@ uct_cuda_ipc_post_cuda_async_copy(uct_ep_h tl_ep, uint64_t remote_addr,
     src = (CUdeviceptr)
         ((direction == UCT_CUDA_IPC_PUT) ? iov[0].buffer : mapped_rem_addr);
 
+    PERF_START(async_copy);
     status = UCT_CUDADRV_FUNC_LOG_ERR(cuMemcpyDtoDAsync(dst, src, iov[0].length,
                                                         *stream));
     if (UCS_OK != status) {
@@ -163,6 +168,11 @@ uct_cuda_ipc_post_cuda_async_copy(uct_ep_h tl_ep, uint64_t remote_addr,
 
     status = UCT_CUDADRV_FUNC_LOG_ERR(cuEventRecord(cuda_ipc_event->super.event,
                                                     *stream));
+    PERF_END(async_copy);
+    if (PERF_COUNT(async_copy) == 640000) {
+        ucs_warn("%s", PERF_REPORT(async_copy));
+        PERF_RESET(async_copy);
+    }
     if (UCS_OK != status) {
         ucs_mpool_put(cuda_ipc_event);
         goto out;
@@ -216,6 +226,7 @@ UCS_PROFILE_FUNC(ucs_status_t, uct_cuda_ipc_ep_put_zcopy,
 {
     ucs_status_t status;
 
+    PERF_START(put_zcopy);
     status = uct_cuda_ipc_post_cuda_async_copy(tl_ep, remote_addr, iov,
                                                rkey, comp, UCT_CUDA_IPC_PUT);
     if (UCS_STATUS_IS_ERR(status)) {
@@ -226,5 +237,10 @@ UCS_PROFILE_FUNC(ucs_status_t, uct_cuda_ipc_ep_put_zcopy,
                       uct_iov_total_length(iov, iovcnt));
     uct_cuda_ipc_trace_data(remote_addr, rkey, "PUT_ZCOPY [length %zu]",
                                 uct_iov_total_length(iov, iovcnt));
+    PERF_END(put_zcopy);
+    if (PERF_COUNT(put_zcopy) == 640000) {
+        ucs_warn("%s", PERF_REPORT(put_zcopy));
+        PERF_RESET(put_zcopy);
+    }
     return status;
 }

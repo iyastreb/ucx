@@ -18,6 +18,9 @@
 #include <ucp/core/ucp_rkey.inl>
 #include <ucp/proto/proto_common.inl>
 
+#include "/workspace/perf.h"
+
+PERF_DECL(put_nbx)
 
 #define UCP_RMA_CHECK_BUFFER(_buffer, _action) \
     do { \
@@ -263,6 +266,7 @@ ucs_status_ptr_t ucp_put_nbx(ucp_ep_h ep, const void *buffer, size_t count,
     ucs_status_t status;
     ucp_request_t *req;
 
+    PERF_START(put_nbx);
     UCP_REQUEST_CHECK_PARAM(param);
     UCP_RMA_CHECK_PTR(worker->context, buffer, count);
     UCP_WORKER_THREAD_CS_ENTER_CONDITIONAL(worker);
@@ -333,6 +337,11 @@ ucs_status_ptr_t ucp_put_nbx(ucp_ep_h ep, const void *buffer, size_t count,
 
 out_unlock:
     UCP_WORKER_THREAD_CS_EXIT_CONDITIONAL(worker);
+    PERF_END(put_nbx);
+    if (PERF_COUNT(put_nbx) == 640000) {
+        ucs_warn("%s", PERF_REPORT(put_nbx));
+        PERF_RESET(put_nbx);
+    }
     return ret;
 }
 

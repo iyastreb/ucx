@@ -23,6 +23,9 @@
 
 #include "rc_mlx5.inl"
 
+#include "/bench/perf.h"
+
+PERF_DECL(put_zcopy)
 
 static ucs_status_t UCS_F_ALWAYS_INLINE uct_rc_mlx5_base_ep_put_short_inline(
         uct_ep_h tl_ep, const void *buffer, unsigned length,
@@ -149,7 +152,7 @@ ucs_status_t uct_rc_mlx5_base_ep_put_zcopy(uct_ep_h tl_ep, const uct_iov_t *iov,
 {
     UCT_RC_MLX5_BASE_EP_DECL(tl_ep, iface, ep);
     ucs_status_t status;
-
+    PERF_START(put_zcopy);
     UCT_CHECK_IOV_SIZE(iovcnt, UCT_RC_MLX5_RMA_MAX_IOV(0),
                        "uct_rc_mlx5_ep_put_zcopy");
     UCT_CHECK_LENGTH(uct_iov_total_length(iov, iovcnt), 0, UCT_IB_MAX_MESSAGE_SIZE,
@@ -166,6 +169,11 @@ ucs_status_t uct_rc_mlx5_base_ep_put_zcopy(uct_ep_h tl_ep, const uct_iov_t *iov,
     UCT_TL_EP_STAT_OP_IF_SUCCESS(status, &ep->super.super, PUT, ZCOPY,
                                  uct_iov_total_length(iov, iovcnt));
     uct_rc_ep_enable_flush_remote(&ep->super);
+    PERF_END(put_zcopy);
+    if (PERF_COUNT(put_zcopy) == 640000) {
+        ucs_warn("%s", PERF_REPORT(put_zcopy));
+        PERF_RESET(put_zcopy);
+    }
     return status;
 }
 
