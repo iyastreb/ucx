@@ -150,6 +150,7 @@ static void ucx_perf_cuda_memcpy(void *dst, ucs_memory_type_t dst_mem_type,
 static void* ucx_perf_cuda_memset(void *dst, int value, size_t count)
 {
     CUDA_CALL(dst, cudaMemset, dst, value, count);
+    CUDA_CALL(dst, cudaDeviceSynchronize);
     return dst;
 }
 

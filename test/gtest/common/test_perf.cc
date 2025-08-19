@@ -215,6 +215,8 @@ void test_perf::test_params_init(const test_spec &test,
     params.send_mem_type   = test.send_mem_type;
     params.recv_mem_type   = test.recv_mem_type;
     params.percentile_rank = 50.0;
+    params.gdaki           = 0;
+    params.cuda_threads    = 1;
 
     memset(params.uct.md_name, 0, sizeof(params.uct.md_name));
 

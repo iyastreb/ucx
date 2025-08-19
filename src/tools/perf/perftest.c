@@ -80,6 +80,20 @@ test_type_t tests[] = {
     {"ucp_put_bw", UCX_PERF_API_UCP, UCX_PERF_CMD_PUT, UCX_PERF_TEST_TYPE_STREAM_UNI,
      "put bandwidth", "overhead", 32},
 
+    {"ucp_put_batch_bw", UCX_PERF_API_UCP, UCX_PERF_CMD_PUT_BATCH, UCX_PERF_TEST_TYPE_STREAM_UNI,
+#ifdef HAVE_CUDA
+     "put batch bandwidth. Use gdaki if GPU is specified with -a", "overhead", 32},
+#else
+     "put batch bandwidth", "overhead", 32},
+#endif
+
+    {"ucp_put_batch_lat", UCX_PERF_API_UCP, UCX_PERF_CMD_PUT_BATCH, UCX_PERF_TEST_TYPE_PINGPONG,
+#ifdef HAVE_CUDA
+     "put batch latency. Use gdaki if GPU is specified with -a", "overhead", 32},
+#else
+     "put batch latency", "overhead", 32},
+#endif
+
     {"ucp_get", UCX_PERF_API_UCP, UCX_PERF_CMD_GET, UCX_PERF_TEST_TYPE_STREAM_UNI,
      "get latency / bandwidth / message rate", "latency", 1},
 
@@ -187,6 +201,8 @@ ucs_status_t init_test_params(perftest_params_t *params)
     params->super.max_time          = 0.0;
     params->super.report_interval   = 1.0;
     params->super.percentile_rank   = 50.0;
+    params->super.gdaki             = 0;
+    params->super.cuda_threads      = 1;
     params->super.flags             = UCX_PERF_TEST_FLAG_VERBOSE;
     params->super.uct.fc_window     = UCT_PERF_TEST_MAX_FC_WINDOW;
     params->super.uct.data_layout   = UCT_PERF_DATA_LAYOUT_SHORT;

@@ -66,6 +66,7 @@ static void usage(const struct perftest_context *ctx, const char *program)
         printf("    %13s - %s %s\n", test->name,
                api_names[test->api], test->desc);
     }
+    printf("     -a             run gdaki test on GPU\n");
     printf("\n");
     printf("     -s <size>      list of scatter-gather sizes for single message (%zu)\n",
                                 ctx->params.super.msg_size_list[0]);
@@ -352,6 +353,9 @@ ucs_status_t parse_test_params(perftest_params_t *params, char opt,
     case 'x':
         ucs_snprintf_zero(params->super.uct.tl_name,
                           sizeof(params->super.uct.tl_name), "%s", opt_arg);
+        return UCS_OK;
+    case 'a':
+        params->super.gdaki = 1;
         return UCS_OK;
     case 't':
         for (i = 0; tests[i].name != NULL; ++i) {
@@ -739,6 +743,11 @@ ucs_status_t parse_opts(struct perftest_context *ctx, int mpi_initialized,
             status = UCS_ERR_INVALID_PARAM;
             goto err;
         }
+    }
+
+    if (ctx->params.super.gdaki) {
+        ctx->params.super.cuda_threads = ctx->params.super.thread_count;
+        ctx->params.super.thread_count = 1;
     }
 
     return init_daemon_params(&ctx->params.super);
