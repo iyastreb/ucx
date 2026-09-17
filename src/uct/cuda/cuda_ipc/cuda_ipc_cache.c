@@ -733,8 +733,9 @@ uct_cuda_ipc_cache_put_region(uct_cuda_ipc_cache_t *cache,
         }
     }
 
-    status = uct_cuda_ipc_open_memhandle(ext_key, cu_dev,
-                                         (CUdeviceptr*)mapped_addr, log_level);
+    status = UCT_CUDA_IPC_PROF("uct_cuda_ipc_open_memhandle",
+            uct_cuda_ipc_open_memhandle(ext_key, cu_dev,
+                                        (CUdeviceptr*)mapped_addr, log_level));
     if (ucs_unlikely(status != UCS_OK)) {
         if (ucs_likely(status == UCS_ERR_ALREADY_EXISTS)) {
             /* unmap all overlapping regions and retry*/

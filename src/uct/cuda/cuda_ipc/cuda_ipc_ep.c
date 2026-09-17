@@ -23,8 +23,69 @@
 #include <uct/base/uct_log.h>
 #include <uct/cuda/base/cuda_iface.h>
 
+#include <pthread.h>
+#include <string.h>
+
 #define UCT_CUDA_IPC_PUT 0
 #define UCT_CUDA_IPC_GET 1
+
+#define UCT_CUDA_IPC_PROF_MAX_ENTRIES 32
+
+typedef struct {
+    const char *name;
+    uint64_t    count;
+    ucs_time_t  total;
+} uct_cuda_ipc_prof_entry_t;
+
+static uct_cuda_ipc_prof_entry_t
+        uct_cuda_ipc_prof_entries[UCT_CUDA_IPC_PROF_MAX_ENTRIES];
+static unsigned uct_cuda_ipc_prof_num_entries = 0;
+static pthread_mutex_t uct_cuda_ipc_prof_lock = PTHREAD_MUTEX_INITIALIZER;
+
+void uct_cuda_ipc_prof_add(const char *name, ucs_time_t elapsed)
+{
+    uct_cuda_ipc_prof_entry_t *entry;
+    unsigned i;
+
+    pthread_mutex_lock(&uct_cuda_ipc_prof_lock);
+
+    for (i = 0; i < uct_cuda_ipc_prof_num_entries; i++) {
+        entry = &uct_cuda_ipc_prof_entries[i];
+        if (!strcmp(entry->name, name)) {
+            goto add;
+        }
+    }
+
+    if (uct_cuda_ipc_prof_num_entries == UCT_CUDA_IPC_PROF_MAX_ENTRIES) {
+        goto out;
+    }
+
+    entry        = &uct_cuda_ipc_prof_entries[uct_cuda_ipc_prof_num_entries++];
+    entry->name  = name;
+    entry->count = 0;
+    entry->total = 0;
+
+add:
+    entry->count++;
+    entry->total += elapsed;
+
+out:
+    pthread_mutex_unlock(&uct_cuda_ipc_prof_lock);
+}
+
+UCS_STATIC_CLEANUP
+{
+    uct_cuda_ipc_prof_entry_t *entry;
+    unsigned i;
+
+    for (i = 0; i < uct_cuda_ipc_prof_num_entries; i++) {
+        entry = &uct_cuda_ipc_prof_entries[i];
+        ucs_warn("cuda_ipc_prof: %-40s count %10" PRIu64 " total %12.3f ms "
+                 "avg %10.3f us",
+                 entry->name, entry->count, ucs_time_to_msec(entry->total),
+                 ucs_time_to_usec(entry->total) / entry->count);
+    }
+}
 
 
 static UCS_CLASS_INIT_FUNC(uct_cuda_ipc_ep_t, const uct_ep_params_t *params)
@@ -83,7 +144,8 @@ static UCS_F_ALWAYS_INLINE ucs_status_t uct_cuda_ipc_ctx_rsc_get(
     CUresult result;
     uct_cuda_ctx_rsc_t *ctx_rsc;
 
-    result = uct_cuda_ctx_get_id(NULL, &ctx_id);
+    result = UCT_CUDA_IPC_PROF("cuCtxGetId", uct_cuda_ctx_get_id(NULL,
+                                                                &ctx_id));
     if (ucs_unlikely(result != CUDA_SUCCESS)) {
         UCT_CUDADRV_LOG(cuCtxGetId, UCS_LOG_LEVEL_ERROR, result);
         return UCS_ERR_IO_ERROR;
@@ -138,8 +200,9 @@ uct_cuda_ipc_event_record_and_enqueue(uct_cuda_ipc_iface_t *iface,
 {
     ucs_status_t status;
 
-    status = UCT_CUDADRV_FUNC_LOG_ERR(cuEventRecord(event->super.event,
-                                                    stream));
+    status = UCT_CUDA_IPC_PROF("cuEventRecord",
+            UCT_CUDADRV_FUNC_LOG_ERR(cuEventRecord(event->super.event,
+                                                   stream)));
     if (ucs_unlikely(status != UCS_OK)) {
         return status;
     }
@@ -160,15 +223,15 @@ uct_cuda_ipc_post_cuda_async_copy(uct_ep_h tl_ep, uint64_t remote_addr,
     uct_cuda_ipc_iface_t *iface       = ucs_derived_of(tl_ep->iface,
                                                        uct_cuda_ipc_iface_t);
     uct_cuda_ipc_unpacked_rkey_t *key = (uct_cuda_ipc_unpacked_rkey_t *)rkey;
-    CUdevice cuda_device;
-    int is_ctx_pushed;
+    CUdevice cuda_device              = CU_DEVICE_INVALID;
+    int is_ctx_pushed                 = 0;
     void *mapped_rem_addr;
     const void *mapped_addr;
-    uct_cuda_ipc_event_desc_t *cuda_ipc_event;
-    uct_cuda_queue_desc_t *q_desc;
+    uct_cuda_ipc_event_desc_t *cuda_ipc_event = NULL;
+    uct_cuda_queue_desc_t *q_desc             = NULL;
     ucs_status_t status;
     CUdeviceptr dst, src;
-    CUstream *stream;
+    CUstream *stream                          = NULL;
 
     if (ucs_unlikely(0 == iov[0].length)) {
         ucs_trace_data("Zero length request: skip it");
@@ -274,21 +337,21 @@ UCS_PROFILE_FUNC(ucs_status_t, uct_cuda_ipc_ep_put_zcopy,
 
 #if CUDA_VERSION >= 13000
 static UCS_F_ALWAYS_INLINE ucs_status_t
-uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
-                                      const size_t *lengths,
-                                      const uint64_t *remote_addrs,
-                                      uct_rkey_t const *rkeys,
-                                      const size_t *counts,
-                                      const size_t *strides, size_t count,
-                                      uct_completion_t *comp, int direction,
-                                      size_t *total_length_p)
+uct_cuda_ipc_post_cuda_sgl_async_copy_do(uct_ep_h tl_ep, void * const *buffers,
+                                         const size_t *lengths,
+                                         const uint64_t *remote_addrs,
+                                         uct_rkey_t const *rkeys,
+                                         const size_t *counts,
+                                         const size_t *strides, size_t count,
+                                         uct_completion_t *comp, int direction,
+                                         size_t *total_length_p)
 {
     uct_cuda_ipc_iface_t *iface = ucs_derived_of(tl_ep->iface,
                                                  uct_cuda_ipc_iface_t);
     uct_cuda_ipc_unpacked_rkey_t *key;
-    uct_cuda_ipc_event_desc_t *cuda_ipc_event;
+    uct_cuda_ipc_event_desc_t *cuda_ipc_event = NULL;
     uct_cuda_ipc_sgl_mapping_t *mapping;
-    uct_cuda_queue_desc_t *q_desc;
+    uct_cuda_queue_desc_t *q_desc             = NULL;
     CUmemcpyAttributes attr;
     void *mapped_addr;
     const void *mapped_base_addr;
@@ -296,10 +359,10 @@ uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
     CUdeviceptr *dsts, *srcs;
     size_t attrs_idx;
     size_t i, total_length;
-    CUdevice cuda_device;
-    CUstream *stream;
+    CUdevice cuda_device                      = CU_DEVICE_INVALID;
+    CUstream *stream                          = NULL;
     ucs_status_t status;
-    int is_ctx_pushed;
+    int is_ctx_pushed                         = 0;
 
     /* TODO: add strided elements support */
     if (ucs_unlikely((counts != NULL) || (strides != NULL))) {
@@ -369,16 +432,17 @@ uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
     }
 
     key    = (uct_cuda_ipc_unpacked_rkey_t *)rkeys[0];
-    status = uct_cuda_ipc_get_stream_and_event(iface, key->stream_id,
-                                               &q_desc, &stream,
-                                               &cuda_ipc_event);
+    status = UCT_CUDA_IPC_PROF("uct_cuda_ipc_get_stream_and_event",
+            uct_cuda_ipc_get_stream_and_event(iface, key->stream_id, &q_desc,
+                                              &stream, &cuda_ipc_event));
     if (ucs_unlikely(status != UCS_OK)) {
         goto out_unmap;
     }
 
-    status = UCT_CUDADRV_FUNC_LOG_ERR(
+    status = UCT_CUDA_IPC_PROF("cuMemcpyBatchAsync",
+            UCT_CUDADRV_FUNC_LOG_ERR(
             cuMemcpyBatchAsync(dsts, srcs, (size_t *)lengths, count, &attr,
-                               &attrs_idx, 1, *stream));
+                               &attrs_idx, 1, *stream)));
     if (ucs_unlikely(status != UCS_OK)) {
         ucs_mpool_put(cuda_ipc_event);
         goto out_unmap;
@@ -412,6 +476,24 @@ out_unmap:
 out_ctx:
     uct_cuda_ipc_check_and_pop_ctx(is_ctx_pushed);
     return status;
+}
+
+static UCS_F_ALWAYS_INLINE ucs_status_t
+uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
+                                      const size_t *lengths,
+                                      const uint64_t *remote_addrs,
+                                      uct_rkey_t const *rkeys,
+                                      const size_t *counts,
+                                      const size_t *strides, size_t count,
+                                      uct_completion_t *comp, int direction,
+                                      size_t *total_length_p)
+{
+    return UCT_CUDA_IPC_PROF("uct_cuda_ipc_post_cuda_sgl_async_copy",
+            uct_cuda_ipc_post_cuda_sgl_async_copy_do(tl_ep, buffers, lengths,
+                                                     remote_addrs, rkeys,
+                                                     counts, strides, count,
+                                                     comp, direction,
+                                                     total_length_p));
 }
 
 UCS_PROFILE_FUNC(ucs_status_t, uct_cuda_ipc_ep_put_sgl_zcopy,

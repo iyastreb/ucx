@@ -10,6 +10,19 @@
 #include <uct/cuda/cuda_ipc/cuda_ipc_md.h>
 #include <uct/cuda/cuda_ipc/cuda_ipc_cache.h>
 #include <uct/cuda/base/cuda_ctx.inl>
+#include <ucs/time/time.h>
+
+
+void uct_cuda_ipc_prof_add(const char *name, ucs_time_t elapsed);
+
+
+#define UCT_CUDA_IPC_PROF(_name, _expr) \
+    ({ \
+        ucs_time_t _prof_start      = ucs_get_time(); \
+        __typeof__(_expr) _prof_ret = (_expr); \
+        uct_cuda_ipc_prof_add(_name, ucs_get_time() - _prof_start); \
+        _prof_ret; \
+    })
 
 
 static UCS_F_ALWAYS_INLINE ucs_status_t
@@ -29,9 +42,10 @@ uct_cuda_ipc_check_and_push_ctx(CUdeviceptr address, CUdevice *cuda_device_p,
     attr_type[1] = CU_POINTER_ATTRIBUTE_DEVICE_ORDINAL;
     attr_data[1] = &cuda_device_ordinal;
 
-    status = UCT_CUDADRV_FUNC_LOG_ERR(
+    status = UCT_CUDA_IPC_PROF("cuPointerGetAttributes",
+            UCT_CUDADRV_FUNC_LOG_ERR(
             cuPointerGetAttributes(UCT_CUDA_IPC_NUM_ATTRS, attr_type, attr_data,
-                                   address));
+                                   address)));
     if (ucs_unlikely(status != UCS_OK)) {
         return status;
     }
@@ -39,28 +53,34 @@ uct_cuda_ipc_check_and_push_ctx(CUdeviceptr address, CUdevice *cuda_device_p,
     ucs_assertv(cuda_device_ordinal >= 0, "cuda_device_ordinal=%d",
                 cuda_device_ordinal);
 
-    status = UCT_CUDADRV_FUNC_LOG_ERR(cuDeviceGet(&cuda_device,
-                                                  cuda_device_ordinal));
+    status = UCT_CUDA_IPC_PROF("cuDeviceGet",
+            UCT_CUDADRV_FUNC_LOG_ERR(cuDeviceGet(&cuda_device,
+                                                 cuda_device_ordinal)));
     if (ucs_unlikely(status != UCS_OK)) {
         return status;
     }
 
     if (cuda_ctx == NULL) {
-        status = uct_cuda_ctx_primary_retain(cuda_device, 0, &cuda_ctx);
+        status = UCT_CUDA_IPC_PROF("uct_cuda_ctx_primary_retain",
+                uct_cuda_ctx_primary_retain(cuda_device, 0, &cuda_ctx));
         if (ucs_unlikely(status != UCS_OK)) {
            return status;
         }
 
-        UCT_CUDADRV_FUNC_LOG_WARN(cuDevicePrimaryCtxRelease(cuda_device));
+        UCT_CUDA_IPC_PROF("cuDevicePrimaryCtxRelease",
+                UCT_CUDADRV_FUNC_LOG_WARN(
+                        cuDevicePrimaryCtxRelease(cuda_device)));
     }
 
-    status = UCT_CUDADRV_FUNC_LOG_ERR(cuCtxGetCurrent(&cuda_ctx_current));
+    status = UCT_CUDA_IPC_PROF("cuCtxGetCurrent",
+            UCT_CUDADRV_FUNC_LOG_ERR(cuCtxGetCurrent(&cuda_ctx_current)));
     if (ucs_unlikely(status != UCS_OK)) {
         return status;
     }
 
     if (cuda_ctx != cuda_ctx_current) {
-        status = UCT_CUDADRV_FUNC_LOG_ERR(cuCtxPushCurrent(cuda_ctx));
+        status = UCT_CUDA_IPC_PROF("cuCtxPushCurrent",
+                UCT_CUDADRV_FUNC_LOG_ERR(cuCtxPushCurrent(cuda_ctx)));
         if (ucs_unlikely(status != UCS_OK)) {
             return status;
         }
@@ -78,7 +98,8 @@ static UCS_F_ALWAYS_INLINE void
 uct_cuda_ipc_check_and_pop_ctx(int is_ctx_pushed)
 {
     if (is_ctx_pushed) {
-        UCT_CUDADRV_FUNC_LOG_WARN(cuCtxPopCurrent(NULL));
+        UCT_CUDA_IPC_PROF("cuCtxPopCurrent",
+                UCT_CUDADRV_FUNC_LOG_WARN(cuCtxPopCurrent(NULL)));
     }
 }
 
@@ -113,8 +134,9 @@ static UCS_F_ALWAYS_INLINE ucs_status_t uct_cuda_ipc_get_remote_address(
     ucs_status_t status;
     void *mapped_addr;
 
-    status = uct_cuda_ipc_map_memhandle(rkey, cu_dev, &mapped_addr,
-                                        UCS_LOG_LEVEL_ERROR);
+    status = UCT_CUDA_IPC_PROF("uct_cuda_ipc_map_memhandle",
+            uct_cuda_ipc_map_memhandle(rkey, cu_dev, &mapped_addr,
+                                       UCS_LOG_LEVEL_ERROR));
     if (ucs_unlikely(status != UCS_OK)) {
         return status;
     }
