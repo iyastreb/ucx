@@ -418,7 +418,7 @@ static void uct_ud_ep_timer(ucs_wtimer_t *self)
 
     diff = now - ep->tx.send_time;
     if (diff > iface->config.peer_timeout) {
-        ucs_debug("ep %p: timeout of %.2f sec, config::peer_timeout - %.2f sec",
+        ucs_diag("ep %p: timeout of %.2f sec, config::peer_timeout - %.2f sec",
                   ep, ucs_time_to_sec(diff),
                   ucs_time_to_sec(iface->config.peer_timeout));
         uct_ud_ep_handle_timeout(ep);
