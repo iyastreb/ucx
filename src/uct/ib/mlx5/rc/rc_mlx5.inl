@@ -8,6 +8,8 @@
 #include "rc_mlx5.h"
 #include "rc_mlx5_common.h"
 
+#include <stdlib.h>
+
 #include <uct/base/uct_iov.inl>
 #include <uct/ib/mlx5/ib_mlx5.inl>
 #include <uct/ib/mlx5/ib_mlx5_log.h>
@@ -514,6 +516,21 @@ uct_rc_mlx5_txwq_update_psn(uct_ib_mlx5_txwq_t *txwq, int qp_type,
     }
 }
 
+/* Diagnostic switch: UCX_SGL_FORCE_DB=1 rings a plain doorbell for multi-WQE
+ * SGL batches instead of BlueFlame-copying only the last WQE. */
+static UCS_F_ALWAYS_INLINE int uct_rc_mlx5_sgl_force_db(void)
+{
+    static int force = -1;
+    const char *value;
+
+    if (ucs_unlikely(force < 0)) {
+        value = getenv("UCX_SGL_FORCE_DB");
+        force = (value != NULL) && (value[0] != '\0') && (value[0] != '0') &&
+                (value[0] != 'n');
+    }
+    return force;
+}
+
 static UCS_F_ALWAYS_INLINE size_t
 uct_rc_mlx5_base_ep_sgl_zcopy_post(uct_rc_mlx5_base_ep_t *ep,
                                    void * const *buffers, const size_t *lengths,
@@ -528,6 +545,7 @@ uct_rc_mlx5_base_ep_sgl_zcopy_post(uct_rc_mlx5_base_ep_t *ep,
     uct_ib_mlx5_txwq_t *txwq       = &ep->tx.wq;
     size_t total                   = 0;
     struct mlx5_wqe_ctrl_seg *ctrl = NULL;
+    struct mlx5_wqe_ctrl_seg *first_ctrl;
     uint32_t num_packets           = 0;
     const size_t non_data_wqe_size = sizeof(struct mlx5_wqe_ctrl_seg) +
                                      sizeof(struct mlx5_wqe_raddr_seg);
@@ -550,7 +568,8 @@ uct_rc_mlx5_base_ep_sgl_zcopy_post(uct_rc_mlx5_base_ep_t *ep,
     ucs_assert(!(txwq->flags & UCT_IB_MLX5_TXWQ_FLAG_FAILED));
     ucs_assert(ucs_div_round_up(data_wqe_size, MLX5_SEND_WQE_BB) == 1);
 
-    curr = txwq->curr;
+    curr       = txwq->curr;
+    first_ctrl = curr;
 
     for (i = 0; i < count; i++) {
         fm_ce_se = ((i == 0) ? fence_flag : 0) |
@@ -598,7 +617,12 @@ uct_rc_mlx5_base_ep_sgl_zcopy_post(uct_rc_mlx5_base_ep_t *ep,
     iface = ucs_derived_of(ep->super.super.super.iface,
                            uct_rc_mlx5_iface_common_t);
     uct_rc_txqp_posted(&ep->super.txqp, &iface->super, res_count, 1);
-    uct_ib_mlx5_txwq_ring_doorbell(txwq, ctrl, txwq->sw_pi, 1);
+    if ((opcode == MLX5_OPCODE_RDMA_WRITE) && (count > 1) &&
+        uct_rc_mlx5_sgl_force_db()) {
+        uct_ib_mlx5_txwq_ring_doorbell_db(txwq, first_ctrl, txwq->sw_pi);
+    } else {
+        uct_ib_mlx5_txwq_ring_doorbell(txwq, ctrl, txwq->sw_pi, 1);
+    }
     uct_rc_mlx5_txwq_add_psn(txwq, IBV_QPT_RC, num_packets);
 
     uct_rc_txqp_add_send_comp_sgl_always(

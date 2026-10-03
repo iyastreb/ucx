@@ -9,6 +9,7 @@
 #endif
 
 #include "rc_mlx5.h"
+
 #if HAVE_DECL_IBV_CMD_MODIFY_QP
 #  include <infiniband/driver.h>
 #endif
