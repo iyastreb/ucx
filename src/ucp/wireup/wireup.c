@@ -759,8 +759,8 @@ ucp_wireup_process_request(ucp_worker_h worker, ucp_ep_h ep,
     int has_cm_lane, am_need_flush, full_handshake_required;
 
     UCP_WIREUP_MSG_CHECK(msg, ep, UCP_WIREUP_MSG_REQUEST);
-    ucs_trace("got wireup request from 0x%"PRIx64" src_ep_id 0x%"PRIx64
-              " dst_ep_id 0x%"PRIx64" conn_sn %d address version %u/%u",
+    ucs_diag("got wireup request from 0x%"PRIx64" src_ep_id 0x%"PRIx64
+             " dst_ep_id 0x%"PRIx64" conn_sn %d address version %u/%u",
               remote_address->uuid, msg->src_ep_id, msg->dst_ep_id,
               msg->conn_sn, remote_address->addr_version,
               remote_address->dst_version);
@@ -775,6 +775,9 @@ ucp_wireup_process_request(ucp_worker_h worker, ucp_ep_h ep,
                                    msg->conn_sn ^
                                    (remote_uuid == worker->uuid),
                                    UCS_CONN_MATCH_QUEUE_EXP);
+        ucs_diag("wireup request from 0x%"PRIx64" conn_sn %d: %s ep %p",
+                 remote_uuid, msg->conn_sn,
+                 (ep != NULL) ? "matched existing" : "no match, creating", ep);
         if (ep == NULL) {
             /* Create a new endpoint if does not exist */
             status = ucp_ep_create_base(worker, ep_init_flags,
