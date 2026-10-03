@@ -24,6 +24,9 @@ ucs_status_t uct_ib_mlx5_completion_with_err(uct_ib_iface_t *iface,
                                              ucs_log_level_t log_level);
 
 
+/* Diagnostic: hardware view of a queue pair (state, PSNs, counters) */
+void uct_ib_mlx5_qpc_dump(uct_ib_mlx5_qp_t *qp, char *buf, size_t max);
+
 void uct_ib_mlx5_wqe_dump(uct_ib_iface_t *iface, void *wqe, void *qstart,
                           void *qend, int max_sge, int dump_qp,
                           uct_log_data_dump_func_t packet_dump_cb,

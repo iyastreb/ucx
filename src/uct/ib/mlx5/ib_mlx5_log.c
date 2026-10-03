@@ -67,6 +67,40 @@ static int uct_ib_mlx5_is_qp_require_av_seg(int qp_type)
     return 0;
 }
 
+void uct_ib_mlx5_qpc_dump(uct_ib_mlx5_qp_t *qp, char *buf, size_t max)
+{
+#if HAVE_DEVX
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(query_qp_in)]   = {};
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(query_qp_out)] = {};
+    void *qpc;
+
+    if (uct_ib_mlx5_devx_query_qp(qp, in, sizeof(in), out, sizeof(out)) !=
+        UCS_OK) {
+        snprintf(buf, max, "qpc 0x%x: query failed", qp->qp_num);
+        return;
+    }
+
+    qpc = UCT_IB_MLX5DV_ADDR_OF(query_qp_out, out, qpc);
+    snprintf(buf, max,
+             "qpc 0x%x: state %u remote_qpn 0x%x rlid %u next_send_psn 0x%x"
+             " last_acked_psn 0x%x ssn %u next_rcv_psn 0x%x rmsn %u"
+             " cur_retry %u hw_sq_wqebb %u hw_rq %u",
+             qp->qp_num, (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, state),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, remote_qpn),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, primary_address_path.rlid),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, next_send_psn),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, last_acked_psn),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, ssn),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, next_rcv_psn),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, rmsn),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, cur_retry_count),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, hw_sq_wqebb_counter),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, hw_rq_counter));
+#else
+    snprintf(buf, max, "qpc 0x%x: no devx", qp->qp_num);
+#endif
+}
+
 ucs_status_t uct_ib_mlx5_completion_with_err(uct_ib_iface_t *iface,
                                              uct_ib_mlx5_err_cqe_t *ecqe,
                                              uct_ib_mlx5_txwq_t *txwq,
@@ -78,6 +112,8 @@ ucs_status_t uct_ib_mlx5_completion_with_err(uct_ib_iface_t *iface,
     char err_info[256]      = {};
     char wqe_info[256]      = {};
     char peer_info[128]     = {};
+    char qpc_info[256]      = {};
+    char sw_info[96]        = {};
     uint16_t pi             = ntohs(ecqe->wqe_counter);
     uint32_t qp_num         = ntohl(ecqe->s_wqe_opcode_qpn) &
                               UCS_MASK(UCT_IB_QPN_ORDER);
@@ -160,6 +196,11 @@ ucs_status_t uct_ib_mlx5_completion_with_err(uct_ib_iface_t *iface,
             }
         }
         qp_type_str = uct_ib_qp_type_str(iface->config.qp_type);
+        uct_ib_mlx5_qpc_dump(&txwq->super, qpc_info, sizeof(qpc_info));
+        snprintf(sw_info, sizeof(sw_info),
+                 " sw_pi %u prev_sw_pi %u sig_pi %u hw_ci %u sw_psn 0x%x",
+                 txwq->sw_pi, txwq->prev_sw_pi, txwq->sig_pi, txwq->hw_ci,
+                 uct_ib_mlx5_txwq_get_next_wqe_psn(txwq));
     } else if ((ecqe->op_own >> 4) == MLX5_CQE_RESP_ERR) {
         wqe = uct_ib_mlx5_srq_get_wqe(&mlx5_iface->rx.srq, pi);
         uct_ib_mlx5_resp_error_dump(wqe, mlx5_iface->tm.mp.num_strides,
@@ -173,10 +214,10 @@ ucs_status_t uct_ib_mlx5_completion_with_err(uct_ib_iface_t *iface,
 
     ucs_log(log_level,
             "%s on " UCT_IB_IFACE_FMT " (synd 0x%x vend 0x%x hw_synd %d/%d)\n"
-            "%s QP 0x%x wqe[%d]: %s %s",
+            "%s QP 0x%x wqe[%d]: %s %s\n%s%s",
             err_info, UCT_IB_IFACE_ARG(iface), ecqe->syndrome,
             ecqe->vendor_err_synd, ecqe->hw_synd_type >> 4, ecqe->hw_err_synd,
-            qp_type_str, qp_num, pi, wqe_info, peer_info);
+            qp_type_str, qp_num, pi, wqe_info, peer_info, qpc_info, sw_info);
 
 out:
     return err_status;
