@@ -902,6 +902,9 @@ uct_rc_gdaki_ep_connect_to_ep_v2(uct_ep_h tl_ep,
     for (i = 0; i < iface->num_channels; i++) {
         dest_qp_num = uct_ib_unpack_uint24(
                 *ucs_serialize_next(&ep_addr, uct_ib_uint24_t));
+        ucs_diag("rc_gda connect channel %u qp 0x%x -> remote qp 0x%x dlid %u dev %s",
+                 i, channels[i].qp.super.qp_num, dest_qp_num, (unsigned)ah_attr.dlid,
+                 uct_ib_device_name(uct_ib_iface_device(&iface->super.super.super)));
         status      = uct_rc_mlx5_iface_common_devx_connect_qp(
                 &iface->super, &channels[i].qp.super, dest_qp_num, &ah_attr,
                 path_mtu, path_index, iface->super.super.config.max_rd_atomic);
