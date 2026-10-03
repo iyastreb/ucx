@@ -2048,6 +2048,13 @@ UCS_CLASS_CLEANUP_FUNC(uct_rc_mlx5_ep_t)
             self->super.super.super.super.iface, uct_rc_mlx5_iface_common_t);
     uct_rc_mlx5_iface_qp_cleanup_ctx_t *cleanup_ctx;
     uint16_t unreleased_cq_credits, unpolled_cqes, cq_credits;
+    char qpc_info[256];
+
+    uct_ib_mlx5_qpc_dump(&self->super.tx.wq.super, qpc_info, sizeof(qpc_info));
+    ucs_diag("rc_mlx5 ep %p destroy: %s sw_pi %u prev_sw_pi %u hw_ci %u"
+             " sw_psn 0x%x", self, qpc_info, self->super.tx.wq.sw_pi,
+             self->super.tx.wq.prev_sw_pi, self->super.tx.wq.hw_ci,
+             uct_ib_mlx5_txwq_get_next_wqe_psn(&self->super.tx.wq));
 
     cleanup_ctx = ucs_malloc(sizeof(*cleanup_ctx), "mlx5_qp_cleanup_ctx");
     ucs_assert_always(cleanup_ctx != NULL);
