@@ -1237,7 +1237,7 @@ ucs_status_t uct_ib_mlx5_select_sl(const uct_ib_iface_config_t *ib_config,
     }
 
     *sl_p = sl;
-    ucs_debug("SL=%u (AR support - %s) was selected on %s:%u,"
+    ucs_diag("SL=%u (AR support - %s) was selected on %s:%u,"
               " SLs with AR support = { %s }, SLs without AR support = { %s }",
               sl, sl_ar_support_str, dev_name, port_num,
               ucs_mask_str(sls_with_ar, &sls_with_ar_str),

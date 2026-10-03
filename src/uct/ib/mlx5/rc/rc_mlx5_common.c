@@ -685,6 +685,13 @@ uct_rc_mlx5_dp_ordering_ooo_init(uct_ib_mlx5_md_t *md,
 
     iface->config.dp_ordering_devx  = max_dp_ordering;
     iface->config.dp_ordering_force = force;
+    ucs_diag("%s/%s: dp_ordering %s (cap %s force %d ddp_dv %d ar_enable %d"
+             " ddp_enable %d)",
+             uct_ib_device_name(&md->super.dev), tl_name,
+             dp_ordering_names[max_dp_ordering],
+             dp_ordering_names[dp_ordering_cap_devx], force,
+             (int)iface->config.ddp_enabled_dv, (int)config->super.ar_enable,
+             (int)config->ddp_enable);
     return UCS_OK;
 }
 
