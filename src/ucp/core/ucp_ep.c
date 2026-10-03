@@ -1618,9 +1618,11 @@ ucp_ep_set_failed(ucp_ep_h ucp_ep, ucp_lane_index_t lane, ucs_status_t status)
     ucs_assert(UCS_STATUS_IS_ERR(status));
     ucs_assert(!ucs_async_is_from_async(&ucp_ep->worker->async));
 
-    ucs_debug("ep %p: set_ep_failed status %s on lane[%d]=%p", ucp_ep,
-              ucs_status_string(status), lane,
-              (lane != UCP_NULL_LANE) ? ucp_ep_get_lane(ucp_ep, lane) : NULL);
+    ucs_diag("ep %p: set_ep_failed status %s on lane[%d]=%p (%s) remote_id 0x%" PRIx64,
+             ucp_ep, ucs_status_string(status), lane,
+             (lane != UCP_NULL_LANE) ? ucp_ep_get_lane(ucp_ep, lane) : NULL,
+             (lane != UCP_NULL_LANE) ? ucp_ep_get_tl_rsc(ucp_ep, lane)->tl_name : "-",
+             (uint64_t)ucp_ep_remote_id(ucp_ep));
 
     /* In case if this is a local failure we need to notify remote side */
     if (ucp_ep_is_cm_local_connected(ucp_ep)) {
@@ -1671,7 +1673,7 @@ ucp_ep_set_failed(ucp_ep_h ucp_ep, ucp_lane_index_t lane, ucs_status_t status)
          * an internal one for sending WIREUP/EP_REMOVED message to a peer.
          * So, close operation was already scheduled, this EP will be deleted
          * after all lanes will be discarded successfully */
-        ucs_debug("ep %p: detected peer failure on internal endpoint", ucp_ep);
+        ucs_diag("ep %p: detected peer failure on internal endpoint", ucp_ep);
         return UCS_OK;
     } else {
         ucs_debug("ep %p: destroy endpoint which is not exposed to a user due"

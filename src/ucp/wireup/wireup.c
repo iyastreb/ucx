@@ -1021,6 +1021,9 @@ ucp_wireup_send_ep_removed(ucp_worker_h worker, const ucp_wireup_msg_t *msg,
     }
 
     ucp_ep_update_remote_id(reply_ep, msg->src_ep_id);
+    ucs_diag("sending EP_REMOVED to %s: msg type %d dst_ep_id 0x%" PRIx64
+             " src_ep_id 0x%" PRIx64 " (no local ep)", remote_address->name,
+             msg->type, msg->dst_ep_id, msg->src_ep_id);
     status = ucp_wireup_msg_send(reply_ep, UCP_WIREUP_MSG_EP_REMOVED,
                                  &ucp_tl_bitmap_min, NULL);
     if (status != UCS_OK) {
@@ -1381,6 +1384,8 @@ static ucs_status_t ucp_wireup_msg_handler(void *arg, void *data,
         ucp_wireup_send_ep_removed(worker, msg, &remote_address);
     } else if (msg->type == UCP_WIREUP_MSG_EP_REMOVED) {
         ucs_assert(msg->dst_ep_id != UCS_PTR_MAP_KEY_INVALID);
+        ucs_diag("ep %p: received EP_REMOVED from %s src_ep_id 0x%" PRIx64, ep,
+                 remote_address.name, msg->src_ep_id);
         ucp_ep_set_lanes_failed_schedule(ep, 0, UCS_ERR_CONNECTION_RESET);
     } else if (msg->type == UCP_WIREUP_MSG_LANES_ADDR_REQUEST) {
         ucs_assert(lanes_info != NULL);
