@@ -84,7 +84,8 @@ void uct_ib_mlx5_qpc_dump(uct_ib_mlx5_qp_t *qp, char *buf, size_t max)
     snprintf(buf, max,
              "qpc 0x%x: state %u remote_qpn 0x%x rlid %u next_send_psn 0x%x"
              " last_acked_psn 0x%x ssn %u next_rcv_psn 0x%x rmsn %u"
-             " cur_retry %u hw_sq_wqebb %u hw_rq %u",
+             " cur_retry %u hw_sq_wqebb %u hw_rq %u sl %u ack_timeout %u"
+             " retry_count %u dp_ordering %u/%u force %u",
              qp->qp_num, (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, state),
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, remote_qpn),
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, primary_address_path.rlid),
@@ -95,7 +96,13 @@ void uct_ib_mlx5_qpc_dump(uct_ib_mlx5_qp_t *qp, char *buf, size_t max)
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, rmsn),
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, cur_retry_count),
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, hw_sq_wqebb_counter),
-             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, hw_rq_counter));
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, hw_rq_counter),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, primary_address_path.sl),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, primary_address_path.ack_timeout),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, retry_count),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, dp_ordering_0),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, dp_ordering_1),
+             (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, dp_ordering_force));
 #else
     snprintf(buf, max, "qpc 0x%x: no devx", qp->qp_num);
 #endif
