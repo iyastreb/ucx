@@ -422,10 +422,11 @@ uct_rc_mlx5_iface_common_am_handler(uct_rc_mlx5_iface_common_t *iface,
     if (ucs_unlikely(byte_len < sizeof(*hdr))) {
         ucs_diag("rx completion shorter than am header: byte_len %u opcode 0x%x"
                  " qp 0x%x imm 0x%x srqn 0x%x flags 0x%x am_id 0x%x",
-                 byte_len, cqe->op_own >> 4,
-                 ntohl(cqe->sop_drop_qpn) & UCS_MASK(UCT_IB_QPN_ORDER),
-                 ntohl(cqe->imm_inval_pkey), ntohl(cqe->srqn_uidx) & UCS_MASK(24),
-                 flags, hdr->rc_hdr.am_id);
+                 byte_len, (unsigned)(cqe->op_own >> 4),
+                 (unsigned)(ntohl(cqe->sop_drop_qpn) & UCS_MASK(UCT_IB_QPN_ORDER)),
+                 (unsigned)ntohl(cqe->imm_inval_pkey),
+                 (unsigned)(ntohl(cqe->srqn_uidx) & UCS_MASK(24)),
+                 flags, (unsigned)hdr->rc_hdr.am_id);
     }
 
     uct_ib_mlx5_log_rx(&iface->super.super, cqe, hdr,
