@@ -631,6 +631,30 @@ void *uct_ib_mlx5_bf_copy(void *dst, void *src, uint16_t num_bb,
     return UCT_IB_MLX5_BF_COPY(dst, src, num_bb, wq, uct_ib_mlx5_bf_copy_bb);
 }
 
+/* Diagnostic: ring a plain doorbell carrying the first WQE of a multi-WQE
+ * batch, without BlueFlame, so the HCA fetches every WQE from memory. */
+static UCS_F_ALWAYS_INLINE void
+uct_ib_mlx5_txwq_ring_doorbell_db(uct_ib_mlx5_txwq_t *wq,
+                                  struct mlx5_wqe_ctrl_seg *first_ctrl,
+                                  uint16_t dbrec_pi)
+{
+    volatile uint64_t *dst = wq->reg->addr.ptr;
+
+    ucs_memory_cpu_store_fence();
+    *wq->dbrec = htonl(dbrec_pi);
+    ucs_memory_bus_store_fence();
+    if (wq->reg->mode == UCT_IB_MLX5_MMIO_MODE_DB_LOCK) {
+        ucs_spin_lock(&wq->reg->db_lock);
+        *dst = *(volatile uint64_t*)first_ctrl;
+        ucs_spin_unlock(&wq->reg->db_lock);
+    } else {
+        *dst = *(volatile uint64_t*)first_ctrl;
+    }
+    ucs_memory_bus_store_fence();
+    ucs_compiler_fence();
+    wq->reg->addr.uint ^= UCT_IB_MLX5_BF_REG_SIZE;
+}
+
 static UCS_F_ALWAYS_INLINE void *
 uct_ib_mlx5_txwq_ring_doorbell(uct_ib_mlx5_txwq_t *wq,
                                struct mlx5_wqe_ctrl_seg *ctrl,
