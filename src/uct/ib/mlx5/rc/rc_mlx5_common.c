@@ -15,6 +15,8 @@
 #include <uct/ib/rc/base/rc_iface.h>
 #include <ucs/arch/bitops.h>
 #include <ucs/profile/profile.h>
+#include <arpa/inet.h>
+#include <stdio.h>
 
 
 ucs_config_field_t uct_rc_mlx5_common_config_table[] = {
@@ -1314,4 +1316,53 @@ void uct_ib_mlx5_devx_set_qpc_dp_ordering(uct_ib_mlx5_md_t *md, void *qpc,
                       UCS_BIT_GET(iface->config.dp_ordering_devx, 1));
     UCT_IB_MLX5DV_SET(qpc, qpc, dp_ordering_force,
                       iface->config.dp_ordering_force);
+}
+
+void uct_rc_mlx5_iface_log_stray_rx(uct_rc_mlx5_iface_common_t *iface,
+                                    struct mlx5_cqe64 *cqe, unsigned byte_len,
+                                    unsigned flags)
+{
+    const uint8_t *raw  = (const uint8_t*)cqe;
+    uint32_t qp_num     = ntohl(cqe->sop_drop_qpn) & UCS_MASK(UCT_IB_QPN_ORDER);
+    uint32_t flags_rqpn = ntohl(cqe->flags_rqpn);
+    char hex[(sizeof(*cqe) * 2) + (sizeof(*cqe) / 4) + 8];
+    char qpc_info[256];
+    char sw_info[96];
+    uct_rc_mlx5_base_ep_t *ep;
+    uct_rc_ep_t *rc_ep;
+    size_t i, n;
+
+    n = 0;
+    for (i = 0; (i < sizeof(*cqe)) && (n < (sizeof(hex) - 4)); ++i) {
+        n += snprintf(hex + n, sizeof(hex) - n, "%02x%s", raw[i],
+                      ((i % 4) == 3) ? " " : "");
+    }
+
+    rc_ep = (iface->super.eps[qp_num >> UCT_RC_QP_TABLE_ORDER] != NULL) ?
+            uct_rc_iface_lookup_ep(&iface->super, qp_num) : NULL;
+    if (rc_ep != NULL) {
+        ep = ucs_derived_of(rc_ep, uct_rc_mlx5_base_ep_t);
+        uct_ib_mlx5_qpc_dump(&ep->tx.wq.super, qpc_info, sizeof(qpc_info));
+        snprintf(sw_info, sizeof(sw_info),
+                 " sw_pi %u prev_sw_pi %u sig_pi %u hw_ci %u sw_psn 0x%x",
+                 ep->tx.wq.sw_pi, ep->tx.wq.prev_sw_pi, ep->tx.wq.sig_pi,
+                 ep->tx.wq.hw_ci,
+                 uct_ib_mlx5_txwq_get_next_wqe_psn(&ep->tx.wq));
+    } else {
+        snprintf(qpc_info, sizeof(qpc_info), "qp 0x%x: no local ep", qp_num);
+        sw_info[0] = '\0';
+    }
+
+    ucs_diag("rx completion shorter than am header on " UCT_IB_IFACE_FMT
+             ": byte_len %u opcode 0x%x qp 0x%x srqn 0x%x slid %u rqpn 0x%x"
+             " sl %u wqe_counter %u imm 0x%x flags 0x%x\ncqe: %s\n%s%s",
+             UCT_IB_IFACE_ARG(&iface->super.super), byte_len,
+             (unsigned)(cqe->op_own >> 4), qp_num,
+             (unsigned)(ntohl(cqe->srqn_uidx) & UCS_MASK(24)),
+             (unsigned)ntohs(cqe->slid),
+             (unsigned)(flags_rqpn & UCS_MASK(UCT_IB_QPN_ORDER)),
+             (unsigned)((flags_rqpn >> 24) & 0xf),
+             (unsigned)ntohs(cqe->wqe_counter),
+             (unsigned)ntohl(cqe->imm_inval_pkey), flags, hex, qpc_info,
+             sw_info);
 }

@@ -589,6 +589,11 @@ ucs_status_t uct_rc_mlx5_iface_common_init(uct_rc_mlx5_iface_common_t *iface,
 
 void uct_rc_mlx5_iface_common_cleanup(uct_rc_mlx5_iface_common_t *iface);
 
+/* Diagnostic: receive completion shorter than the AM header */
+void uct_rc_mlx5_iface_log_stray_rx(uct_rc_mlx5_iface_common_t *iface,
+                                    struct mlx5_cqe64 *cqe, unsigned byte_len,
+                                    unsigned flags);
+
 ucs_status_t uct_rc_mlx5_iface_common_dm_init(uct_rc_mlx5_iface_common_t *iface,
                                               uct_rc_iface_t *rc_iface,
                                               const uct_ib_mlx5_iface_config_t *mlx5_config);
