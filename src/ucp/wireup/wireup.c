@@ -914,9 +914,9 @@ ucp_wireup_process_reply_common(ucp_worker_h worker, ucp_ep_h ep,
     ucs_status_t status;
     int ack;
 
-    ucs_trace("ep %p: got wireup reply src_ep_id 0x%"PRIx64
-              " dst_ep_id 0x%"PRIx64" sn %d", ep, msg->src_ep_id,
-              msg->dst_ep_id, msg->conn_sn);
+    ucs_diag("ep %p: got wireup reply src_ep_id 0x%"PRIx64
+             " dst_ep_id 0x%"PRIx64" sn %d", ep, msg->src_ep_id,
+             msg->dst_ep_id, msg->conn_sn);
 
     ucp_ep_match_remove_ep(worker, ep);
     ucp_ep_update_remote_id(ep, msg->src_ep_id);
