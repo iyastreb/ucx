@@ -9,6 +9,8 @@
 #endif
 
 #include "rc_mlx5.h"
+
+#include <stdlib.h>
 #if HAVE_DECL_IBV_CMD_MODIFY_QP
 #  include <infiniband/driver.h>
 #endif
@@ -256,6 +258,21 @@ ucs_status_t uct_rc_mlx5_base_ep_put_zcopy(uct_ep_h tl_ep, const uct_iov_t *iov,
     return status;
 }
 
+/* Diagnostic switch: UCX_SGL_FORCE_DB=1 rings a plain doorbell for multi-WQE
+ * SGL batches instead of BlueFlame-copying only the last WQE. */
+static int uct_rc_mlx5_sgl_force_db(void)
+{
+    static int force = -1;
+    const char *value;
+
+    if (ucs_unlikely(force < 0)) {
+        value = getenv("UCX_SGL_FORCE_DB");
+        force = (value != NULL) && (value[0] != '\0') && (value[0] != '0') &&
+                (value[0] != 'n');
+    }
+    return force;
+}
+
 ucs_status_t
 uct_rc_mlx5_base_ep_put_sgl_zcopy(uct_ep_h tl_ep, void * const *buffers,
                                   const size_t *lengths, uct_mem_h const *memhs,
@@ -268,6 +285,7 @@ uct_rc_mlx5_base_ep_put_sgl_zcopy(uct_ep_h tl_ep, void * const *buffers,
     uct_ib_mlx5_txwq_t *txwq       = &ep->tx.wq;
     size_t total                   = 0;
     struct mlx5_wqe_ctrl_seg *ctrl = NULL;
+    struct mlx5_wqe_ctrl_seg *first_ctrl;
     uint32_t num_packets           = 0;
     const size_t non_data_wqe_size = sizeof(struct mlx5_wqe_ctrl_seg) +
                                      sizeof(struct mlx5_wqe_raddr_seg);
@@ -316,6 +334,7 @@ uct_rc_mlx5_base_ep_put_sgl_zcopy(uct_ep_h tl_ep, void * const *buffers,
 
     pi   = txwq->sw_pi;
     curr = txwq->curr;
+    first_ctrl = curr;
 
     fence      = uct_rc_ep_fm(&iface->super, &txwq->fi, 1);
     fence_flag = fence ? iface->config.put_fence_flag : 0;
@@ -363,7 +382,11 @@ uct_rc_mlx5_base_ep_put_sgl_zcopy(uct_ep_h tl_ep, void * const *buffers,
     txwq->sig_pi      = txwq->prev_sw_pi;
 
     uct_rc_txqp_posted(&ep->super.txqp, &iface->super, res_count, 1);
-    uct_ib_mlx5_txwq_ring_doorbell(txwq, ctrl, txwq->sw_pi, 1);
+    if ((count > 1) && uct_rc_mlx5_sgl_force_db()) {
+        uct_ib_mlx5_txwq_ring_doorbell_db(txwq, first_ctrl, txwq->sw_pi);
+    } else {
+        uct_ib_mlx5_txwq_ring_doorbell(txwq, ctrl, txwq->sw_pi, 1);
+    }
     uct_rc_mlx5_txwq_add_psn(txwq, IBV_QPT_RC, num_packets);
 
     uct_rc_txqp_add_send_comp_always(&iface->super, &ep->super.txqp,
