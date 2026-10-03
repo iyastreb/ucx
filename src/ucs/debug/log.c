@@ -285,6 +285,7 @@ void ucs_log_print_compact(const char *str)
         }
 
         fprintf(ucs_log_file, "%s", output_cstr);
+        fflush(ucs_log_file);
     } else {
         fprintf(stdout, "%s", output_cstr);
     }
@@ -320,6 +321,7 @@ static void ucs_log_print(const char *short_file, int line,
         fprintf(ucs_log_file, UCS_LOG_FMT,
                 UCS_LOG_ARG(short_file, line, level,
                             comp_conf, tv, message));
+        fflush(ucs_log_file);
     } else {
         fprintf(stdout, UCS_LOG_SHORT_FMT,
                 UCS_LOG_SHORT_ARG(short_file, line, level,
