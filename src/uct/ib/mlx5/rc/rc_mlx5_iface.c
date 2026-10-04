@@ -822,6 +822,43 @@ uct_rc_mlx5_iface_init_fence_flags(uct_rc_mlx5_iface_common_t *iface,
     return UCS_OK;
 }
 
+/* With AR_ENABLE=auto the device maximum ordering is requested on DevX QPs
+ * even when the selected SL has no adaptive routing, so packets arrive in
+ * order and out-of-order placement brings nothing. Use IBTA ordering there,
+ * as verbs QPs get through the SL configuration. */
+static void
+uct_rc_mlx5_iface_dp_ordering_follow_sl(uct_rc_mlx5_iface_common_t *iface,
+                                        const uct_rc_mlx5_iface_common_config_t *config)
+{
+#if HAVE_DEVX
+    uct_ib_iface_t *ib_iface = &iface->super.super;
+    uct_ib_mlx5_md_t *md     = uct_ib_mlx5_iface_md(ib_iface);
+    uint16_t ooo_sl_mask     = 0;
+
+    if ((config->super.ar_enable != UCS_AUTO) ||
+        (config->ddp_enable == UCS_YES) ||
+        ((iface->config.dp_ordering_devx == UCT_IB_MLX5_DP_ORDERING_IBTA) &&
+         !iface->config.ddp_enabled_dv) ||
+        uct_ib_iface_is_roce(ib_iface) ||
+        (uct_ib_mlx5_devx_query_ooo_sl_mask(md, ib_iface->config.port_num,
+                                            &ooo_sl_mask) != UCS_OK) ||
+        (ooo_sl_mask & UCS_BIT(ib_iface->config.sl))) {
+        return;
+    }
+
+    ucs_debug("%s: SL %u has no adaptive routing (ooo_sl_mask 0x%x), using"
+              " IBTA ordering instead of %d (ddp_dv %d)",
+              uct_ib_device_name(uct_ib_iface_device(ib_iface)),
+              ib_iface->config.sl, ooo_sl_mask,
+              (int)iface->config.dp_ordering_devx,
+              (int)iface->config.ddp_enabled_dv);
+    iface->config.dp_ordering_devx  = UCT_IB_MLX5_DP_ORDERING_IBTA;
+    iface->config.dp_ordering_force = !!(md->flags &
+                                         UCT_IB_MLX5_MD_FLAG_DP_ORDERING_FORCE);
+    iface->config.ddp_enabled_dv    = 0;
+#endif
+}
+
 UCS_CLASS_INIT_FUNC(uct_rc_mlx5_iface_common_t, uct_iface_ops_t *tl_ops,
                     uct_rc_iface_ops_t *ops, uct_md_h tl_md,
                     uct_worker_h worker, const uct_iface_params_t *params,
@@ -881,6 +918,8 @@ UCS_CLASS_INIT_FUNC(uct_rc_mlx5_iface_common_t, uct_iface_ops_t *tl_ops,
     if (status != UCS_OK) {
         return status;
     }
+
+    uct_rc_mlx5_iface_dp_ordering_follow_sl(self, mlx5_config);
 
     status = UCS_STATS_NODE_ALLOC(&self->stats, &uct_rc_mlx5_iface_stats_class,
                                   self->super.stats, "");
