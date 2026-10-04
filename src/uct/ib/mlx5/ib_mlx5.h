@@ -495,6 +495,7 @@ typedef struct uct_ib_mlx5_iface_config {
     uct_ib_mlx5_mmio_mode_t     mmio_mode;
     uct_ib_mlx5_bf_copy_mode_t  bf_copy_mode;
     ucs_ternary_auto_value_t    ar_enable;
+    int                         dp_ordering_sl_check;
     int                         cqe_zip_enable[UCT_IB_DIR_LAST];
 } uct_ib_mlx5_iface_config_t;
 
