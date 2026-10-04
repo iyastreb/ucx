@@ -87,6 +87,12 @@ ucs_config_field_t uct_ib_mlx5_iface_config_table[] = {
      "+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n",
      ucs_offsetof(uct_ib_mlx5_iface_config_t, ar_enable), UCS_CONFIG_TYPE_TERNARY_AUTO},
 
+    {"DP_ORDERING_SL_CHECK", "n",
+     "With UCX_IB_AR_ENABLE=auto on InfiniBand, request IBTA ordering on DevX QPs when\n"
+     "the selected SL has no adaptive routing support, instead of the device maximum.",
+     ucs_offsetof(uct_ib_mlx5_iface_config_t, dp_ordering_sl_check),
+     UCS_CONFIG_TYPE_BOOL},
+
     {"TX_CQE_ZIP_ENABLE", "no",
      "Enable CQE zipping feature for sender side. CQE zipping reduces PCI utilization by\n"
      "merging several similar CQEs to a single CQE written by the device.",
