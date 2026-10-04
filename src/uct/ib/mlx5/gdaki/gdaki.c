@@ -689,10 +689,63 @@ uct_rc_gdaki_ep_reset_channels(uct_rc_gdaki_ep_t *ep)
     ep->channel_block = NULL;
 }
 
-static void uct_rc_gdaki_cleanup_channels_pooled(uct_rc_gdaki_ep_t *ep)
+/* A pooled channel block is reused by a later endpoint, whose connect runs
+ * INIT2RTR; the firmware rejects that on a queue pair left in RTS, so move
+ * every channel back to INIT before returning the block to the pool. */
+static ucs_status_t
+uct_rc_gdaki_channel_reinit(uct_rc_gdaki_iface_t *iface,
+                            uct_rc_gdaki_channel_t *channel)
 {
+    uct_ib_iface_t *ib_iface = &iface->super.super.super;
+    char in[UCT_IB_MLX5DV_ST_SZ_BYTES(rst2init_qp_in)]   = {};
+    char out[UCT_IB_MLX5DV_ST_SZ_BYTES(rst2init_qp_out)] = {};
+    ucs_status_t status;
+    void *qpc;
+
+    status = uct_ib_mlx5_devx_modify_qp_state(&channel->qp.super,
+                                              IBV_QPS_RESET);
+    if (status != UCS_OK) {
+        return status;
+    }
+
+    qpc = UCT_IB_MLX5DV_ADDR_OF(rst2init_qp_in, in, qpc);
+    UCT_IB_MLX5DV_SET(rst2init_qp_in, in, opcode,
+                      UCT_IB_MLX5_CMD_OP_RST2INIT_QP);
+    UCT_IB_MLX5DV_SET(rst2init_qp_in, in, qpn, channel->qp.super.qp_num);
+    UCT_IB_MLX5DV_SET(qpc, qpc, pm_state, UCT_IB_MLX5_QPC_PM_STATE_MIGRATED);
+    UCT_IB_MLX5DV_SET(qpc, qpc, primary_address_path.vhca_port_num,
+                      ib_iface->config.port_num);
+    if (!uct_ib_iface_is_roce(ib_iface)) {
+        UCT_IB_MLX5DV_SET(qpc, qpc, primary_address_path.pkey_index,
+                          ib_iface->pkey_index);
+    }
+    UCT_IB_MLX5DV_SET(qpc, qpc, counter_set_id,
+                      uct_ib_mlx5_iface_get_counter_set_id(ib_iface));
+    UCT_IB_MLX5DV_SET(qpc, qpc, rwe, true);
+
+    return uct_ib_mlx5_devx_obj_modify(channel->qp.super.devx.obj, in,
+                                       sizeof(in), out, sizeof(out),
+                                       "2INIT_QP");
+}
+
+static void uct_rc_gdaki_cleanup_channels_pooled(uct_rc_gdaki_iface_t *iface,
+                                                 uct_rc_gdaki_ep_t *ep)
+{
+    ucs_status_t status;
+    unsigned i;
+
     if (ep->channel_block == NULL) {
         return;
+    }
+
+    for (i = 0; i < iface->num_channels; i++) {
+        status = uct_rc_gdaki_channel_reinit(iface,
+                                             &ep->channel_block->channels[i]);
+        if (status != UCS_OK) {
+            ucs_warn("gdaki ep %p: failed to reset channel %u qp 0x%x: %s", ep,
+                     i, ep->channel_block->channels[i].qp.super.qp_num,
+                     ucs_status_string(status));
+        }
     }
 
     ucs_mpool_put(ep->channel_block);
@@ -775,7 +828,7 @@ static void uct_rc_gdaki_ep_cleanup_channels(uct_rc_gdaki_iface_t *iface,
                                              uct_rc_gdaki_ep_t *ep)
 {
     if (iface->ep_alloc_mode == UCT_RC_GDAKI_EP_ALLOC_MODE_POOL) {
-        uct_rc_gdaki_cleanup_channels_pooled(ep);
+        uct_rc_gdaki_cleanup_channels_pooled(iface, ep);
         return;
     }
 
