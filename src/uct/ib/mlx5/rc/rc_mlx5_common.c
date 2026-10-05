@@ -83,8 +83,10 @@ ucs_config_field_t uct_rc_mlx5_common_config_table[] = {
    ucs_offsetof(uct_rc_mlx5_iface_common_config_t, log_ack_req_freq),
    UCS_CONFIG_TYPE_UINT},
 
-  {"DDP_ENABLE", "try",
-   "Enable direct data placement\n",
+  {"DDP_ENABLE", "n",
+   "Enable direct data placement (out-of-order placement of SENDs as well as\n"
+   "RDMA operations). Off by default: out-of-order RDMA (OOO_RW) is still used\n"
+   "where the device supports it.\n",
    ucs_offsetof(uct_rc_mlx5_iface_common_config_t, ddp_enable), 
    UCS_CONFIG_TYPE_TERNARY},
 
