@@ -9,6 +9,7 @@
 #endif
 
 #include "ib_mlx5_log.h"
+#include <arpa/inet.h>
 
 #include <uct/ib/base/ib_device.h>
 #include <uct/ib/mlx5/ib_mlx5.inl>
@@ -67,6 +68,30 @@ static int uct_ib_mlx5_is_qp_require_av_seg(int qp_type)
     return 0;
 }
 
+#if HAVE_DEVX
+/* Raw QP context of the first few queried QPs per process, for a bit-level
+ * comparison with QPs created by other stacks. */
+static void uct_ib_mlx5_qpc_hexdump(uint32_t qpn, const void *qpc)
+{
+    static int dumped = 0;
+    const uint32_t *w = qpc;
+    unsigned nwords   = UCT_IB_MLX5DV_ST_SZ_BYTES(qpc) / sizeof(uint32_t);
+    char hex[32 * 9 + 1];
+    unsigned i, j, len;
+
+    if (dumped++ >= 2) {
+        return;
+    }
+    for (i = 0; i < nwords; i += 32) {
+        len = 0;
+        for (j = i; (j < i + 32) && (j < nwords); ++j) {
+            len += snprintf(hex + len, sizeof(hex) - len, "%08x ", ntohl(w[j]));
+        }
+        ucs_diag("qpc 0x%x words %u-%u: %s", qpn, i, j - 1, hex);
+    }
+}
+#endif
+
 void uct_ib_mlx5_qpc_dump(uct_ib_mlx5_qp_t *qp, char *buf, size_t max)
 {
 #if HAVE_DEVX
@@ -103,6 +128,7 @@ void uct_ib_mlx5_qpc_dump(uct_ib_mlx5_qp_t *qp, char *buf, size_t max)
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, dp_ordering_0),
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, dp_ordering_1),
              (unsigned)UCT_IB_MLX5DV_GET(qpc, qpc, dp_ordering_force));
+    uct_ib_mlx5_qpc_hexdump(qp->qp_num, qpc);
 #else
     snprintf(buf, max, "qpc 0x%x: no devx", qp->qp_num);
 #endif
