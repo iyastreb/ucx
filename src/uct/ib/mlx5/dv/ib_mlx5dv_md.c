@@ -182,8 +182,8 @@ uct_ib_mlx5_devx_reg_ksm(uct_ib_mlx5_md_t *md, uint64_t address, size_t length,
                                        uct_ib_mlx5_calc_mkey_inlen(list_size),
                                        out, sizeof(out));
     if (mr == NULL) {
-        ucs_debug("%s: mlx5dv_devx_obj_create(CREATE_MKEY, mode=KSM, "
-                  "start_addr=0x%lx length=%zu) failed, syndrome 0x%x: %m",
+        ucs_diag("%s: mlx5dv_devx_obj_create(CREATE_MKEY, mode=KSM, "
+                 "start_addr=0x%lx length=%zu) failed, syndrome 0x%x: %m",
                   uct_ib_device_name(&md->super.dev), address, length,
                   UCT_IB_MLX5DV_GET(create_mkey_out, out, syndrome));
         return UCS_ERR_UNSUPPORTED;
@@ -873,12 +873,19 @@ uct_ib_mlx5_devx_reg_mr(uct_ib_mlx5_md_t *md, uct_ib_mlx5_devx_mem_t *memh,
         if (status == UCS_OK) {
             *rkey_p = *lkey_p = mkey;
             memh->super.flags |= UCT_IB_MEM_MULTITHREADED;
+            ucs_diag("%s: registered %p..%p as multi-thread KSM mkey 0x%x",
+                     uct_ib_device_name(&md->super.dev), address,
+                     UCS_PTR_BYTE_OFFSET(address, length), mkey);
             return UCS_OK;
         } else if (status != UCS_ERR_UNSUPPORTED) {
             return status;
         }
 
         /* Fallback if multi-thread registration is unsupported */
+        ucs_diag("%s: multi-thread registration of %p..%p is unsupported, "
+                 "falling back to a single MR",
+                 uct_ib_device_name(&md->super.dev), address,
+                 UCS_PTR_BYTE_OFFSET(address, length));
     }
 
     memh->mrs[mr_type].super.ib = uct_ib_mlx5_direct_nic_reg_mr(md, address,
@@ -886,6 +893,10 @@ uct_ib_mlx5_devx_reg_mr(uct_ib_mlx5_md_t *md, uct_ib_mlx5_devx_mem_t *memh,
                                                                 access_flags);
     if (memh->mrs[mr_type].super.ib != NULL) {
         memh->super.flags |= UCT_IB_MEM_DIRECT_NIC;
+        ucs_diag("%s: registered %p..%p through Data Direct, lkey 0x%x",
+                 uct_ib_device_name(&md->super.dev), address,
+                 UCS_PTR_BYTE_OFFSET(address, length),
+                 memh->mrs[mr_type].super.ib->lkey);
         goto out;
     }
 
@@ -893,6 +904,16 @@ uct_ib_mlx5_devx_reg_mr(uct_ib_mlx5_md_t *md, uct_ib_mlx5_devx_mem_t *memh,
                            NULL, &memh->mrs[mr_type].super.ib);
     if (status != UCS_OK) {
         return status;
+    }
+
+    if (length >= (1ull << 30)) {
+        ucs_diag("%s: registered %p..%p with %s, lkey 0x%x",
+                 uct_ib_device_name(&md->super.dev), address,
+                 UCS_PTR_BYTE_OFFSET(address, length),
+                 (UCS_PARAM_VALUE(UCT_MD_MEM_REG_FIELD, params, dmabuf_fd,
+                                  DMABUF_FD, UCT_DMABUF_FD_INVALID) ==
+                  UCT_DMABUF_FD_INVALID) ? "ibv_reg_mr" : "ibv_reg_dmabuf_mr",
+                 memh->mrs[mr_type].super.ib->lkey);
     }
 
 out:
