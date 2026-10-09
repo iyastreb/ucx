@@ -341,8 +341,6 @@ uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
     memset(&attr, 0, sizeof(attr));
     attr.srcAccessOrder = CU_MEMCPY_SRC_ACCESS_ORDER_STREAM;
     if (iface->config.sgl_overlap_compute) {
-        /* Without the hint the driver may copy with SMs, and a multi-GB KV
-         * transfer then completes only when concurrent kernels finish. */
         attr.flags = CU_MEMCPY_FLAG_PREFER_OVERLAP_WITH_COMPUTE;
     }
     attrs_idx           = 0;
