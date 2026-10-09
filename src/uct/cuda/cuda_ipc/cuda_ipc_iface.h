@@ -28,6 +28,7 @@ typedef struct {
     double                  latency;             /* estimated latency */
     double                  overhead;            /* estimated CPU overhead */
     int                     enable_same_process; /* enable cuda_ipc for same pid same device */
+    int                     sgl_overlap_compute; /* copy engines for batched copies */
 } uct_cuda_ipc_iface_config_params_t;
 
 

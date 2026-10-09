@@ -77,6 +77,12 @@ static ucs_config_field_t uct_cuda_ipc_iface_config_table[] = {
      ucs_offsetof(uct_cuda_ipc_iface_config_t, params.enable_same_process),
      UCS_CONFIG_TYPE_BOOL},
 
+    {"SGL_OVERLAP_COMPUTE", "y",
+     "Ask the driver to execute batched (SGL) copies on copy engines so they\n"
+     "overlap with SM compute instead of waiting for running kernels",
+     ucs_offsetof(uct_cuda_ipc_iface_config_t, params.sgl_overlap_compute),
+     UCS_CONFIG_TYPE_BOOL},
+
     {NULL}
 };
 
