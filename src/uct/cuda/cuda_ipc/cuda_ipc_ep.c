@@ -285,9 +285,11 @@ uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
 {
     uct_cuda_ipc_iface_t *iface = ucs_derived_of(tl_ep->iface,
                                                  uct_cuda_ipc_iface_t);
+    uct_cuda_ipc_unpacked_rkey_t *prev_key = NULL;
     uct_cuda_ipc_unpacked_rkey_t *key;
     uct_cuda_ipc_event_desc_t *cuda_ipc_event;
     uct_cuda_ipc_sgl_mapping_t *mapping;
+    uct_cuda_ipc_sgl_entry_t *entry;
     uct_cuda_queue_desc_t *q_desc;
     CUmemcpyAttributes attr;
     void *mapped_addr;
@@ -345,19 +347,27 @@ uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
     for (i = 0; i < count; i++) {
         key = (uct_cuda_ipc_unpacked_rkey_t *)rkeys[i];
 
-        status = uct_cuda_ipc_get_remote_address(&key->super, remote_addrs[i],
-                                                 cuda_device, &mapped_addr,
-                                                 &mapped_base_addr);
-        if (ucs_unlikely(status != UCS_OK)) {
-            goto out_unmap;
+        if (!iface->config.sgl_reuse_mapping || (i == 0) || (key != prev_key)) {
+            status = uct_cuda_ipc_get_remote_address(&key->super, remote_addrs[i],
+                                                     cuda_device, &mapped_addr,
+                                                     &mapped_base_addr);
+            if (ucs_unlikely(status != UCS_OK)) {
+                goto out_unmap;
+            }
+
+            /* Hold one mapping reference per run until the event completes. */
+            entry              = &mapping->entries[mapping->count++];
+            entry->pid         = key->super.super.pid;
+            entry->pid_ns      = key->super.pid_ns;
+            entry->d_bptr      = (uintptr_t)key->super.super.d_bptr;
+            entry->mapped_addr = mapped_base_addr;
+            prev_key           = key;
+        } else {
+            mapped_addr = uct_cuda_ipc_rkey_get_local_address(
+                    &key->super.super, remote_addrs[i], mapped_base_addr);
         }
 
-        mapping->entries[i].pid         = key->super.super.pid;
-        mapping->entries[i].pid_ns      = key->super.pid_ns;
-        mapping->entries[i].d_bptr      = (uintptr_t)key->super.super.d_bptr;
-        mapping->entries[i].mapped_addr = mapped_base_addr;
-        mapped_addrs[i]                 = (CUdeviceptr)mapped_addr;
-        mapping->count++;
+        mapped_addrs[i] = (CUdeviceptr)mapped_addr;
     }
 
     if (direction == UCT_CUDA_IPC_PUT) {

@@ -77,6 +77,11 @@ static ucs_config_field_t uct_cuda_ipc_iface_config_table[] = {
      ucs_offsetof(uct_cuda_ipc_iface_config_t, params.enable_same_process),
      UCS_CONFIG_TYPE_BOOL},
 
+    {"SGL_REUSE_MAPPING", "n",
+     "Reuse a CUDA IPC mapping for consecutive SGL entries with the same rkey",
+     ucs_offsetof(uct_cuda_ipc_iface_config_t, params.sgl_reuse_mapping),
+     UCS_CONFIG_TYPE_BOOL},
+
     {NULL}
 };
 
