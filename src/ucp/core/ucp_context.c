@@ -681,6 +681,15 @@ static ucs_config_field_t ucp_context_config_table[] = {
    ucs_offsetof(ucp_context_config_t, proto_use_single_net_device),
    UCS_CONFIG_TYPE_BOOL},
 
+  {"RMA_SINGLE_NET_DEVICE", "n",
+   "Restrict PUT/GET protocol lanes to distinct paths on one local network\n"
+   "interface and one remote network device. The local device is chosen\n"
+   "among the closest eligible devices using the NODE_LOCAL_ID hint.\n"
+   "If either device's topology identity is unknown, keep only one network\n"
+   "lane. MAX_RMA_RAILS still limits the number of selected lanes.",
+   ucs_offsetof(ucp_context_config_t, proto_rma_use_single_net_device),
+   UCS_CONFIG_TYPE_BOOL},
+
   {"MAX_HCA_PER_GPU", "inf",
    "Maximum number of HCAs to register GPU memory on.\n"
    " - inf  : register on all HCAs (default).\n"

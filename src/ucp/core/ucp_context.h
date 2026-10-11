@@ -263,6 +263,8 @@ typedef struct ucp_context_config {
     ucp_gpu_nic_assignment_mode_t          gpu_nic_assignment_mode;
     /** Restrict lanes to one network device per protocol */
     int                                    proto_use_single_net_device;
+    /** Restrict RMA lanes to paths on one local/remote network device pair */
+    int                                    proto_rma_use_single_net_device;
     /** Max HCAs for GPU memory registration: auto=closest, N=limit, inf=all */
     unsigned long                          max_hca_per_gpu;
     /** Local identifier on a single node or UCS_ULUNITS_AUTO */

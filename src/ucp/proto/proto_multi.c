@@ -378,6 +378,74 @@ static ucp_lane_index_t ucp_proto_multi_filter_single_net_device(
     return num_filtered_lanes;
 }
 
+static ucp_lane_index_t ucp_proto_multi_filter_rma_single_net_device(
+        ucp_lane_index_t num_lanes, const ucp_proto_init_params_t *params,
+        const ucp_proto_common_tl_perf_t *tl_perfs, int fixed_first_lane,
+        unsigned req_sys_dev_ord, ucp_lane_index_t *lanes)
+{
+    ucp_proto_lane_selection_t selection = {0};
+    ucp_lane_map_t index_map             = 0;
+    const ucp_ep_config_key_lane_t *anchor, *cfg_lane, *kept_lane;
+    ucp_lane_index_t i, j, anchor_index, anchor_lane, num_filtered_lanes;
+    ucs_sys_device_t sys_dev;
+
+    num_lanes = ucp_proto_multi_filter_single_net_device(
+            num_lanes, params, tl_perfs, fixed_first_lane, req_sys_dev_ord,
+            lanes);
+
+    for (i = 0; i < num_lanes; ++i) {
+        if (ucp_proto_common_is_net_dev(params, lanes[i])) {
+            index_map |= UCS_BIT(i);
+        }
+    }
+
+    if (index_map == 0) {
+        return num_lanes;
+    }
+
+    if (fixed_first_lane && (index_map & UCS_BIT(0))) {
+        anchor_index = 0;
+    } else {
+        anchor_index = ucp_proto_multi_find_max_avail_bw_lane(
+                params, lanes, tl_perfs, &selection, index_map,
+                req_sys_dev_ord);
+        if (anchor_index == UCP_NULL_LANE) {
+            anchor_index = ucs_ffs64(index_map);
+        }
+    }
+
+    anchor_lane = lanes[anchor_index];
+    anchor      = &params->ep_config_key->lanes[anchor_lane];
+    sys_dev     = ucp_proto_common_get_sys_dev(params, anchor_lane);
+    for (i = 0, num_filtered_lanes = 0; i < num_lanes; ++i) {
+        cfg_lane = &params->ep_config_key->lanes[lanes[i]];
+        if (ucp_proto_common_is_net_dev(params, lanes[i])) {
+            if ((lanes[i] != anchor_lane) &&
+                ((sys_dev == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+                 (anchor->dst_sys_dev == UCS_SYS_DEVICE_ID_UNKNOWN) ||
+                 (cfg_lane->rsc_index != anchor->rsc_index) ||
+                 (cfg_lane->dst_sys_dev != anchor->dst_sys_dev))) {
+                continue;
+            }
+
+            for (j = 0; j < num_filtered_lanes; ++j) {
+                kept_lane = &params->ep_config_key->lanes[lanes[j]];
+                if (ucp_proto_common_is_net_dev(params, lanes[j]) &&
+                    (kept_lane->path_index == cfg_lane->path_index)) {
+                    break;
+                }
+            }
+            if (j != num_filtered_lanes) {
+                continue;
+            }
+        }
+
+        lanes[num_filtered_lanes++] = lanes[i];
+    }
+
+    return num_filtered_lanes;
+}
+
 /* Check whether the multi-lane protocol is applicable. */
 static ucs_status_t
 ucp_proto_multi_check_params(const ucp_proto_multi_init_params_t *params)
@@ -812,7 +880,14 @@ ucs_status_t ucp_proto_multi_init(const ucp_proto_multi_init_params_t *params,
             ucs_topo_sys_device_get_name(req_sys_dev), req_sys_dev_ord);
 
     if (params->super.super.worker->context->config.ext
-                .proto_use_single_net_device) {
+                .proto_rma_use_single_net_device &&
+        ucp_proto_init_check_op(&params->super.super,
+                               UCS_BIT(UCP_OP_ID_PUT) | UCS_BIT(UCP_OP_ID_GET))) {
+        num_lanes = ucp_proto_multi_filter_rma_single_net_device(
+                num_lanes, &params->super.super, lanes_perf, fixed_first_lane,
+                req_sys_dev_ord, lanes);
+    } else if (params->super.super.worker->context->config.ext
+                       .proto_use_single_net_device) {
         num_lanes = ucp_proto_multi_filter_single_net_device(
                 num_lanes, &params->super.super, lanes_perf, fixed_first_lane,
                 req_sys_dev_ord, lanes);
@@ -891,6 +966,7 @@ void ucp_proto_multi_query_config(const ucp_proto_query_params_t *params,
     const ucp_proto_multi_priv_t *mpriv = params->priv;
     const ucp_ep_config_key_lane_t *cfg_lane, *cfg_lane0;
     const ucp_proto_multi_lane_priv_t *lpriv;
+    const uct_tl_resource_desc_t *tl_rsc;
     size_t percent, remaining;
     int same_rsc, same_path;
     ucp_lane_index_t i;
@@ -934,6 +1010,23 @@ void ucp_proto_multi_query_config(const ucp_proto_query_params_t *params,
                 ucs_string_buffer_appendf(&strb, " and ");
             } else {
                 ucs_string_buffer_appendf(&strb, ", ");
+            }
+        }
+    }
+
+    if (params->worker->context->config.ext.proto_rma_use_single_net_device &&
+        ucp_proto_select_check_op(params->select_param,
+                                 UCS_BIT(UCP_OP_ID_PUT) | UCS_BIT(UCP_OP_ID_GET))) {
+        for (i = 0; i < mpriv->num_lanes; ++i) {
+            cfg_lane = ucp_proto_multi_ep_lane_cfg(params, i);
+            tl_rsc   = &params->worker->context->tl_rscs[cfg_lane->rsc_index]
+                            .tl_rsc;
+            if (tl_rsc->dev_type == UCT_DEVICE_TYPE_NET) {
+                ucs_string_buffer_appendf(
+                        &strb, " [rma_nic rsc %u sysdev %u remote %u]",
+                        cfg_lane->rsc_index, tl_rsc->sys_device,
+                        cfg_lane->dst_sys_dev);
+                break;
             }
         }
     }
