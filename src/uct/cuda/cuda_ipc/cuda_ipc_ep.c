@@ -286,6 +286,7 @@ uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
     uct_cuda_ipc_iface_t *iface = ucs_derived_of(tl_ep->iface,
                                                  uct_cuda_ipc_iface_t);
     uct_cuda_ipc_unpacked_rkey_t *prev_key = NULL;
+    const void *mapped_base_addr = NULL;
     uct_cuda_ipc_unpacked_rkey_t *key;
     uct_cuda_ipc_event_desc_t *cuda_ipc_event;
     uct_cuda_ipc_sgl_mapping_t *mapping;
@@ -293,7 +294,6 @@ uct_cuda_ipc_post_cuda_sgl_async_copy(uct_ep_h tl_ep, void * const *buffers,
     uct_cuda_queue_desc_t *q_desc;
     CUmemcpyAttributes attr;
     void *mapped_addr;
-    const void *mapped_base_addr;
     CUdeviceptr *mapped_addrs;
     CUdeviceptr *dsts, *srcs;
     size_t attrs_idx;
